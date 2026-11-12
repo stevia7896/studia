@@ -82,17 +82,14 @@ uv run StartWork.py --web
 
 ### 1. 先拿到 Key
 
-去任意一家支持 **OpenAI 兼容接口**的服务商注册，控制台里创建 API Key，会得到一串 `sk-` 开头的字符。常用几家：
+去任意一家支持 **OpenAI 兼容接口**的服务商注册，控制台里创建 API Key，会得到一串 `sk-` 开头的字符。这里以 DeepSeek 为例：
 
 | 服务商 | 服务地址 | 模型名示例 |
 | --- | --- | --- |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| 阿里通义（百炼） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| 月之暗面 Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
-| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-plus` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 
-> 需要识别图片题（智慧树智慧课程、超星章节作业里的图）就挑**带视觉能力**的模型，比如 `qwen-vl-plus`、`glm-4v-plus`、`gpt-4o-mini`。
+> 别家只要是 **OpenAI 兼容接口**也能填，照它的文档换服务地址和模型名就行。
+> 要识别图片题（智慧树智慧课程、超星章节作业里的图），得选支持视觉的模型。
 
 ### 2. 填进去
 
