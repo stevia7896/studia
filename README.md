@@ -182,6 +182,6 @@ uv sync --locked
 
 ## 说明
 
-本项目基于 [yijunjie07/studia](https://github.com/yijunjie07/studia) 使用；部分早期代码源自 [11273/mooc-work-answer](https://github.com/11273/mooc-work-answer)。上游未声明许可证，再分发前请确认授权。
+本仓库由 [stevia7896](https://github.com/stevia7896) 维护。代码基于 [yijunjie07/studia](https://github.com/yijunjie07/studia)，早期部分源自 [11273/mooc-work-answer](https://github.com/11273/mooc-work-answer)；上游未声明许可证，再分发前请确认授权。
 
 [完整使用指南](docs/USAGE.md) · [开发说明](docs/DEVELOPMENT.md)

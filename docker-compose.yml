@@ -3,8 +3,8 @@
 services:
   studia:
     # 镜像由仓库的 GitHub Actions 构建发布，服务器只需拉取。自己改了代码想本地构建：
-    # docker build -t ghcr.io/yijunjie07/studia:latest .
-    image: ghcr.io/yijunjie07/studia:latest
+    # docker build -t ghcr.io/stevia7896/studia:latest .
+    image: ghcr.io/stevia7896/studia:latest
     restart: unless-stopped
     # 更新时先让任务停稳、记下进度，重启后自动接着学。
     stop_grace_period: 30s

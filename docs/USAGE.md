@@ -48,7 +48,7 @@ docker compose logs studia        # 找到「设置码」
 数据都在 Docker 卷 `studia-data`（容器内 `/data`）里：`studia.db` 是账号、邀请码和登录会话的 SQLite 数据库，`users/<用户 ID>/` 是每个人的平台登录、AI 模型、答案记忆和答题报告，`audit.log` 是登录和管理操作记录（不含密码和令牌），`secret.key` 是自动生成的主密钥。
 
 - **主密钥丢了，加密的配置就解不开**，用户需要重新登录平台、重新填 API Key。把 `secret.key` 另外备份一份；更稳妥的做法是用 `python StartWork.py --serve --gen-key` 生成密钥，写进 `.env` 的 `STUDIA_SECRET_KEY`，这样密钥不和数据放在一起。
-- 镜像由仓库自动构建发布到 `ghcr.io/yijunjie07/studia`（`latest` 跟着 main 更新，另有每次提交的 SHA 标签，支持 amd64 和 arm64），服务器只需要 `docker-compose.yml`，不用下载源码、也不用自己构建。
+- 镜像由仓库自动构建发布到 `ghcr.io/stevia7896/studia`（`latest` 跟着 main 更新，另有每次提交的 SHA 标签，支持 amd64 和 arm64），服务器只需要 `docker-compose.yml`，不用下载源码、也不用自己构建。
 - 更新：`docker compose pull && docker compose up -d`，数据卷保留，登录会话也保留。想固定在某个版本，把 `latest` 换成对应的提交 SHA。
 - 更新时正在跑的任务：停止前会先停稳并记下来，重启后（1 小时内）自动接着跑——自动学习从平台记录的进度继续，每日复习只补剩下的时间；AI 答题不自动重跑（可能已交过卷），在任务历史里显示「更新时中断」，点「重新作答」即可。任务历史也会保留。
 - 国内服务器拉 `ghcr.io` 可能很慢甚至失败，可以给 Docker 配置镜像加速，或把镜像同步到阿里云等国内仓库。
