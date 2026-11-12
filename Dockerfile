@@ -1,7 +1,7 @@
 # Studia 服务器模式（多用户）。用法见 docs/USAGE.md 的「Docker 部署」。
 FROM python:3.12-slim
 # Links the published image to the repository (public repo → public image).
-LABEL org.opencontainers.image.source=https://github.com/yijunjie07/studia
+LABEL org.opencontainers.image.source=https://github.com/stevia7896/studia
 
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
@@ -13,7 +13,7 @@ ENV TZ=Asia/Shanghai \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 
 # Log timestamps and the admin's log export use local time.
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata libatomic1 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
