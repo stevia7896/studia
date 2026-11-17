@@ -35,7 +35,8 @@ def exam_url(value):
         parts = urlsplit(url)
         if (parts.scheme != "https" or parts.hostname not in ("mooc1-api.chaoxing.com", "mooc1.chaoxing.com")
                 or parts.port not in (None, 443) or parts.username or parts.password
-                or not parts.path.startswith("/exam-ans/exam/")):
+                or not (parts.path.startswith("/exam-ans/exam/")
+                        or parts.path == "/exam-ans/android/mtaskmsgspecial")):
             raise ValueError
     except ValueError:
         raise ChaoxingError("考试地址无法识别，请在学习通核对") from None
@@ -68,16 +69,7 @@ def decode_exam_list(text, course):
             return []
         raise ChaoxingError("考试目录格式无法识别，请刷新或到学习通核对")
     entries, seen = [], set()
-    for node in lists[0].xpath('./li'):
-        url = exam_url(node.get("data") or "")
-        params = parse_qs(urlsplit(url).query)
-        eid = params.get("taskrefId", [""])[0]
-        if (not eid.isdigit() or len(params.get("taskrefId", [])) != 1
-                or len(params.get("enc_task", [])) != 1 or eid in seen):
-            raise ChaoxingError("考试目录缺少唯一标识或校验参数")
-        for key, expected in (("courseId", course["courseId"]), ("classId", course["clazzId"]), ("cpi", course["cpi"])):
-            if key in params and params[key] != [str(expected)]:
-                raise ChaoxingError("考试目录与当前课程不符")
+    for index, node in enumerate(lists[0].xpath('./li')):
         names = node.xpath('.//p')
         states = node.xpath('.//span[not(contains(concat(" ", normalize-space(@class), " "), " fr "))]')
         if not names or not states:
@@ -86,10 +78,32 @@ def decode_exam_list(text, course):
         if not name:
             raise ChaoxingError("考试目录缺少名称")
         done = status in ("已完成", "已提交", "已交卷")
-        item = {"id": "exam-" + eid, "exam_id": eid, "name": name, "_exam_url": url,
+        available = status in ("未交", "待做", "待考试", "可以参加", "正在作答", "考试中", "进行中")
+        raw_url = node.get("data") or ""
+        url = exam_url(raw_url) if available else None
+        # 已交卷/不可作答的行可能只有查看地址或没有链接；它们不需要开考参数。
+        try:
+            params = parse_qs(urlsplit(url or raw_url).query)
+        except ValueError:
+            params = {}
+        ids = params.get("taskrefId", [])
+        eid = ids[0] if len(ids) == 1 and ids[0].isdigit() else ""
+        if available and (not eid or len(params.get("enc_task", [])) != 1):
+            raise ChaoxingError("考试目录缺少唯一标识或校验参数")
+        # 无真实 ID 的不可作答行仅用于显示，不能匹配交卷回查或用于开考。
+        eid = eid or "unavailable-%d" % index
+        if eid in seen:
+            raise ChaoxingError("考试目录缺少唯一标识或校验参数")
+        for key, expected in (("courseId", course["courseId"]), ("classId", course["clazzId"]),
+                              ("clazzId", course["clazzId"]), ("cpi", course["cpi"])):
+            if key in params and params[key] != [str(expected)]:
+                raise ChaoxingError("考试目录与当前课程不符")
+        item = {"id": "exam-" + eid, "exam_id": eid, "name": name,
                 "_completion_status": "submitted" if done else "not_started",
                 "_hint": " · ".join(n.text_content().strip() for n in _all(node, "span", "fr"))}
-        if done or status not in ("未交", "待做", "待考试", "可以参加", "正在作答", "考试中", "进行中"):
+        if available:
+            item["_exam_url"] = url
+        else:
             item["_unavailable"] = ("已提交" if done else status or "状态未知", "考试%s，请在学习通核对。" % (status or "状态未知"))
         entries.append((course, item, 2))
         seen.add(eid)
