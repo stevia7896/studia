@@ -91,8 +91,8 @@ const state = {
 function freshRun() { return { detail: "", overall: null, sub: null, lines: [], unit: null }; }
 const runOf = (id) => (state.runs[id] = state.runs[id] || freshRun());
 // Mirrors the server's rules (web/server.py _check_conflicts) so buttons say why before you click.
-const GROUP = { study: "learn", review: "learn", meeting: "learn", answer: "answer", mastery: "answer", qa: "qa", ask: "ask" };
-const jobType = (j) => j.kind || { 自动学习: "study", 每日复习: "review", 见面课: "meeting", "AI 答题": "answer", 掌握度学习: "mastery", 问答区答题: "qa", 问答区提问: "ask" }[j.title];
+const GROUP = { study: "learn", review: "learn", meeting: "learn", answer: "answer", exam: "answer", mastery: "answer", qa: "qa", ask: "ask" };
+const jobType = (j) => j.kind || { 自动学习: "study", 每日复习: "review", 见面课: "meeting", "AI 答题": "answer", "AI 考试": "exam", 掌握度学习: "mastery", 问答区答题: "qa", 问答区提问: "ask" }[j.title];
 // Only learning jobs fill a course's unit grid.
 const learns = (j) => GROUP[jobType(j)] === "learn";
 // A job in the list that is not running: waiting for a slot, or paused by an administrator.
@@ -115,7 +115,7 @@ function focusedJob() {
     || [...state.jobs].reverse().find((j) => j.state === "running") || state.jobs.find((j) => !isPaused(j)) || state.jobs[0] || null;
 }
 const platformOf = (pid) => state.platforms.find((p) => p.id === pid);
-const key = (pid, cid) => `${pid}:${cid}`;
+const key = (pid, cid, exam = false) => `${pid}:${cid}${exam ? ":exam" : ""}`;
 const selectedOf = (k) => (state.selected[k] = state.selected[k] || new Set());
 const courseOf = (pid, cid) => (state.courses[pid] || []).find((c) => c.id === cid);
 const go = (hash) => { if (location.hash !== hash) location.hash = hash; else route(); };
@@ -325,7 +325,7 @@ function setPage(html) {
   if (on && (on.offsetLeft < nav.scrollLeft || on.offsetLeft + on.offsetWidth > nav.scrollLeft + nav.clientWidth)) nav.scrollLeft = on.offsetLeft - 16;
 }
 
-const LABEL = { study: "自动学习", review: "每日复习", meeting: "见面课", answer: "AI 答题", mastery: "掌握度学习", qa: "问答区答题", ask: "问答区提问" };
+const LABEL = { study: "自动学习", review: "每日复习", meeting: "见面课", answer: "AI 答题", exam: "AI 考试", mastery: "掌握度学习", qa: "问答区答题", ask: "问答区提问" };
 const TYPE_OF = Object.fromEntries(Object.entries(LABEL).map(([k, v]) => [v, k]));
 const STATE_WORD = { done: "完成", error: "失败", waiting: "等你操作", stopped: "已停止", running: "进行中", queued: "排队中", paused: "已暂停" };
 
@@ -974,7 +974,7 @@ function fixButtons(j, i) {
   const type = TYPE_OF[j.title];
   // An update stopped it and it was not restarted on its own (answering, or interrupted too long ago).
   if (j.state === "stopped" && j.summary === "更新时中断" && i === state.history.findIndex((x) => x.course === j.course && x.title === j.title)) {
-    return type === "answer" ? `<button class="btn small" data-go="#/course/${j.platform}/${j.course}/answer">重新作答</button>`
+    return ["answer", "exam"].includes(type) ? `<button class="btn small" data-go="#/course/${j.platform}/${j.course}/${type}">重新作答</button>`
       : `<button class="btn small primary" data-retry="${i}">重试</button>`;
   }
   if (j.state === "waiting") {
@@ -983,11 +983,11 @@ function fixButtons(j, i) {
     if (/登录/.test(j.summary)) return `<button class="btn small primary" data-go="#/login/${j.platform}">重新登录</button>`;
     if (/时长/.test(j.summary)) return "";
     if (type === "qa" || type === "ask") return `<button class="btn small" data-retry="${i}">重试</button>`;
-    if (type === "answer") return `<button class="btn small" data-go="#/course/${j.platform}/${j.course}/answer">验证后重新作答</button>`;
+    if (["answer", "exam"].includes(type)) return `<button class="btn small" data-go="#/course/${j.platform}/${j.course}/${type}">验证后重新作答</button>`;
     return `<button class="btn small" data-retry="${i}">验证后重试</button>`;
   }
   if (j.state !== "error" || i !== state.history.findIndex((x) => x.course === j.course && x.title === j.title)) return "";
-  if (type === "answer") return `<button class="btn small" data-go="#/course/${j.platform}/${j.course}/answer">重新选择试卷</button>`;
+  if (["answer", "exam"].includes(type)) return `<button class="btn small" data-go="#/course/${j.platform}/${j.course}/${type}">重新选择试卷</button>`;
   return `<button class="btn small primary" data-retry="${i}">重试</button>`;
 }
 
@@ -1086,7 +1086,7 @@ function studyActions(p, c) {
     ...(f.mastery ? [["mastery", ICON.spark, "掌握度学习", "AI 作答并提交知识点练习；满分和免考跳过，每点最多 3 次。最新成绩可能覆盖旧成绩"]] : [])];
 }
 // "#/course/p/c/<tab>": the Q&A tab only exists on courses whose assessment counts it.
-const courseTab = (c, tab) => tab === "answer" ? "answer" : tab === "qa" && c.features?.qa ? "qa"
+const courseTab = (c, tab) => tab === "answer" ? "answer" : tab === "exam" && c.platform === "cx" ? "exam" : tab === "qa" && c.features?.qa ? "qa"
   : c.features && c.features.study === false ? "answer" : "study";
 
 // Q&A tab. Where the interaction share stands, then two actions: answer a few questions now, or have
@@ -1222,8 +1222,9 @@ const STAMP = { 考试: "k", 测验: "c" };
 
 function renderCourse(p, c, tab, full = false) {
   const k = key(p.id, c.id);
-  const papers = state.papers[k];
-  const open = (papers || []).filter((x) => x.available && !x.done).length;
+  const exam = tab === "exam", pk = key(p.id, c.id, exam);
+  const papers = state.papers[pk];
+  const answerOpen = (state.papers[k] || []).filter((x) => x.available && !x.done).length;
   const answerBlock = blocker(p.id, c.id, "answer");
   const head = `
     <section class="hero">
@@ -1235,14 +1236,15 @@ function renderCourse(p, c, tab, full = false) {
       <div class="hero_side">
         <div class="hero_stat"><span class="hero_label">学习进度</span>
           ${c.progress == null ? '<span class="digits"><i>—</i></span>' : `<span class="digits">${[...String(c.progress)].map((d) => `<i>${esc(d)}</i>`).join("")}<small>%</small></span>`}
-          <span class="hero_note score_note">${scoreNote(c, papers, state.earned[k])}</span></div>
+          <span class="hero_note score_note">${scoreNote(c, state.papers[k], state.earned[k])}</span></div>
         ${p.features.answer ? `<button class="hero_stat" data-go="#/course/${p.id}/${c.id}/answer"><span class="hero_label">可作答</span>
-          <span class="pen_num">${papers ? open : "—"}</span><span class="hero_note">${p.id === "cx" ? "份作业" : "份试卷"} ›</span></button>` : ""}
+          <span class="pen_num">${state.papers[k] ? answerOpen : "—"}</span><span class="hero_note">${p.id === "cx" ? "份作业" : "份试卷"} ›</span></button>` : ""}
       </div>
     </section>
     <div class="tabs seg" role="tablist">
       ${p.features.study ? `<button class="tab" role="tab" aria-selected="${tab === "study"}" data-go="#/course/${p.id}/${c.id}">学习</button>` : ""}
-      <button class="tab" role="tab" aria-selected="${tab === "answer"}" data-go="#/course/${p.id}/${c.id}/answer">答题${open ? `<span class="n">${open}</span>` : ""}</button>
+      <button class="tab" role="tab" aria-selected="${tab === "answer"}" data-go="#/course/${p.id}/${c.id}/answer">答题${answerOpen ? `<span class="n">${answerOpen}</span>` : ""}</button>
+      ${p.features.exam ? `<button class="tab" role="tab" aria-selected="${exam}" data-go="#/course/${p.id}/${c.id}/exam">考试</button>` : ""}
       ${c.features?.qa ? `<button class="tab" role="tab" aria-selected="${tab === "qa"}" data-go="#/course/${p.id}/${c.id}/qa">问答区</button>` : ""}
     </div>`;
   let body;
@@ -1261,10 +1263,10 @@ function renderCourse(p, c, tab, full = false) {
   } else if (!p.features.answer) {
     body = `<div class="notice">${esc(p.name)} 的网页版答题还在接入中。现在可以在终端里运行 <code>python StartWork.py</code>，选这门课后进入「AI 答题」。</div>`;
   } else if (!papers) {
-    const failed = state.paperErrors[k];
-    body = failed ? `<div class="empty">${esc(failed)} · <button class="link" data-papers-retry="${esc(k)}">重试</button></div>` : `<div class="empty">正在读取试卷…</div>`;
+    const failed = state.paperErrors[pk];
+    body = failed ? `<div class="empty">${esc(failed)} · <button class="link" data-papers-retry="${esc(pk)}">重试</button></div>` : `<div class="empty">正在读取${exam ? "考试" : "试卷"}…</div>`;
   } else {
-    const selected = selectedOf(k);
+    const selected = selectedOf(pk);
     for (const id of selected) if (!papers.some((x) => x.id === id && x.available)) selected.delete(id);
     const row = (x) => {
       const on = selected.has(x.id);
@@ -1273,7 +1275,7 @@ function renderCourse(p, c, tab, full = false) {
         : x.redo ? '<span class="pill blue">可重做</span>'
         : x.done ? `<span class="pill">已提交</span>` : "";
       const note = x.reason || (x.redo_left != null ? "重做会覆盖当前成绩" : x.hint) || (x.available ? x.status : "");
-      return `<button class="paper ${on ? "on" : ""} ${x.available ? "" : "off"}" data-paper="${esc(x.id)}">
+      return `<button class="paper ${on ? "on" : ""} ${x.available ? "" : "off"}" data-paper="${esc(x.id)}" aria-pressed="${on}" aria-disabled="${!x.available}">
         <span class="box">${on ? ICON.tick : ""}</span><span class="stamp ${STAMP[x.category] || ""}">${esc((x.category || "作")[0])}</span>
         <span class="pname"><b>${esc(x.name)}</b><small title="${esc(x.hint || note)}">${esc(note)}</small></span>
         <span>${pill}</span>
@@ -1283,17 +1285,18 @@ function renderCourse(p, c, tab, full = false) {
     const rank = (label) => (order.includes(label) ? order.indexOf(label) : order.length);
     const categories = [...new Set(papers.map((x) => x.category))].sort((a, b) => rank(a) - rank(b));
     const n = selected.size;
-    const cxNote = p.id === "cx" ? '<div class="notice">超星不提供章节作业的提交状态，请到平台确认哪些还没做，只勾选要作答的。</div>' : "";
+    const cxNote = exam ? `<div class="notice">每次选择一场考试，开始作答可能启动平台倒计时。「保存答案」不会交卷；选择自动交卷时，仅在全部题目答完并保存成功后提交。考试码、人脸验证或专用客户端要求请在学习通完成。<button class="link" data-papers-retry="${esc(pk)}">刷新考试列表</button></div>`
+      : p.id === "cx" ? '<div class="notice">超星不提供章节作业的提交状态，请到平台确认哪些还没做，只勾选要作答的。</div>' : "";
     body = cxNote + (categories.map((label) => {
       const list = papers.filter((x) => x.category === label), open = list.filter((x) => x.available);
       const all = open.length && open.every((x) => selected.has(x.id));
-      return `<div class="section"><h3>${esc(label)}</h3><span class="aside">${open.length} / ${list.length} 份可选</span>
-          ${open.length > 1 ? `<button class="link" data-pick-all="${esc(label)}">${all ? "取消全选" : "全选"}</button>` : ""}</div>
+      return `<div class="section"><h3>${esc(label)}</h3><span class="aside">${open.length} / ${list.length} ${exam ? "场" : "份"}可选</span>
+          ${!exam && open.length > 1 ? `<button class="link" data-pick-all="${esc(label)}">${all ? "取消全选" : "全选"}</button>` : ""}</div>
         <div class="papers">${list.map(row).join("")}</div>`;
-    }).join("") || `<div class="empty">这门课没有作业、测验或考试</div>`);
-    if (categories.length) body += `<div class="dock"><span class="info">${answerBlock ? esc(answerBlock) : n ? `已选 <b>${n}</b> 份 · 交卷前会再确认一次` : "勾选要作答的试卷"}</span>
-      <button class="btn" data-save ${n && !answerBlock ? "" : "disabled"}>${p.id === "cx" ? "保存答案（不交卷）" : "仅生成答案"}</button>
-      <button class="btn primary" data-submit data-confirm="再按一次，交 ${n} ${p.id === "cx" ? "份作业" : "份卷"}" ${n && !answerBlock ? "" : "disabled"}>AI 作答并交卷</button></div>`;
+    }).join("") || `<div class="empty">${exam ? "这门课暂无考试" : "这门课没有作业、测验或考试"}</div>`);
+    if (categories.length) body += `<div class="dock"><span class="info">${answerBlock ? esc(answerBlock) : n ? `已选 <b>${n}</b> ${exam ? "场 · 开始前需再次确认" : "份 · 交卷前会再确认一次"}` : exam ? "选择要参加的考试" : "勾选要作答的试卷"}</span>
+      <button class="btn" data-save ${exam ? 'data-confirm="确认开始考试并保存答案"' : ""} ${n && !answerBlock ? "" : "disabled"}>${p.id === "cx" ? "保存答案（不交卷）" : "仅生成答案"}</button>
+      <button class="btn primary" data-submit data-confirm="${exam ? "确认开始考试并自动交卷" : `再按一次，交 ${n} ${p.id === "cx" ? "份作业" : "份卷"}`}" ${n && !answerBlock ? "" : "disabled"}>${exam ? "AI 考试并交卷" : "AI 作答并交卷"}</button></div>`;
   }
   page.style.setProperty("--c", inkOf(c));
   if (full) setPage(head + body); else { quiet = true; setPage(head + body); quiet = false; }
@@ -1333,39 +1336,41 @@ function renderCourse(p, c, tab, full = false) {
   page.querySelectorAll("[data-paper]").forEach((el) => (el.onclick = () => {
     const x = papers.find((y) => String(y.id) === el.dataset.paper);
     if (!x.available) { toast(x.reason || "这份试卷暂不可选"); return; }
-    const selected = selectedOf(k);
-    selected.has(x.id) ? selected.delete(x.id) : selected.add(x.id);
+    const selected = selectedOf(pk), on = selected.has(x.id);
+    if (exam) selected.clear();
+    on ? selected.delete(x.id) : selected.add(x.id);
     renderCourse(p, c, tab);
   }));
   page.querySelectorAll("[data-pick-all]").forEach((el) => (el.onclick = () => {
-    const open = papers.filter((x) => x.category === el.dataset.pickAll && x.available), selected = selectedOf(k);
+    const open = papers.filter((x) => x.category === el.dataset.pickAll && x.available), selected = selectedOf(pk);
     const all = open.every((x) => selected.has(x.id));
     open.forEach((x) => (all ? selected.delete(x.id) : selected.add(x.id)));
     renderCourse(p, c, tab);
   }));
-  const tasks = () => [...selectedOf(k)];
+  const tasks = () => [...selectedOf(pk)];
   const save = $("[data-save]", page);
-  if (save) save.onclick = () => startJob({ platform: p.id, course: c.id, type: "answer", tasks: tasks(), auto_submit: false });
+  if (save) save.onclick = () => startJob({ platform: p.id, course: c.id, type: exam ? "exam" : "answer", tasks: tasks(), auto_submit: false });
   const submit = $("[data-submit]", page);
-  if (submit) submit.onclick = () => startJob({ platform: p.id, course: c.id, type: "answer", tasks: tasks(), auto_submit: true });
+  if (submit) submit.onclick = () => startJob({ platform: p.id, course: c.id, type: exam ? "exam" : "answer", tasks: tasks(), auto_submit: true });
   if (tab === "study") loadUnits(p.id, c.id);
   if (c.shares) loadEarned(p, c);
-  if (tab === "answer" && p.features.answer && !papers && !state.paperErrors[k]) loadPapers(p, c);
+  if ((tab === "answer" || exam) && p.features.answer && !papers && !state.paperErrors[pk]) loadPapers(p, c, exam);
 }
 
 const loadingPapers = new Set();
-async function loadPapers(p, c) {
-  const k = key(p.id, c.id);
+async function loadPapers(p, c, exam = false, fresh = false) {
+  const k = key(p.id, c.id, exam);
   if (loadingPapers.has(k)) return;
   loadingPapers.add(k);
   try {
-    const papers = (await api(`/api/platforms/${p.id}/tasks?course=${encodeURIComponent(c.id)}`)).tasks;
+    const papers = (await api(`/api/platforms/${p.id}/${exam ? "exams" : "tasks"}?course=${encodeURIComponent(c.id)}${fresh ? "&fresh=1" : ""}`)).tasks;
     state.papers[k] = papers;
     delete state.paperErrors[k];
     const selected = selectedOf(k);
-    if (!selected.size) papers.filter((x) => x.available && !x.done && x.status !== "状态未知").forEach((x) => selected.add(x.id));
+    if (!exam && !selected.size) papers.filter((x) => x.available && !x.done && x.status !== "状态未知").forEach((x) => selected.add(x.id));
   } catch (error) {
     // A failed read is not an empty course: keep it unloaded so a retry or the next login reads it again.
+    delete state.papers[k];
     state.paperErrors[k] = error.message;
   } finally {
     loadingPapers.delete(k);
@@ -1410,7 +1415,7 @@ function recentCells(k) {
 }
 
 const player = $(".player"), sheet = $(".sheet");
-const LIVE_WORD = { 自动学习: "正在学习", 每日复习: "正在复习", 见面课: "正在观看见面课", "AI 答题": "正在答题", 问答区答题: "正在回答", 问答区提问: "正在提问" };
+const LIVE_WORD = { 自动学习: "正在学习", 每日复习: "正在复习", 见面课: "正在观看见面课", "AI 答题": "正在答题", "AI 考试": "正在考试", 问答区答题: "正在回答", 问答区提问: "正在提问" };
 const recentlyDone = () => (!state.jobs.length && state.lastDone && Date.now() - state.lastDone.shownAt < 60000 ? state.lastDone : null);
 
 function renderPlayer() {
@@ -1424,7 +1429,7 @@ function renderPlayer() {
     player.style.setProperty("--c", inkOf({ id: job.course }));
     player.classList.remove("ended");
     patch(player, `
-      <div class="np"><span class="art">${{ "AI 答题": ICON.pen, 每日复习: ICON.repeat, 问答区答题: ICON.chat, 问答区提问: ICON.chat }[job.title] || ICON.play}</span>
+      <div class="np"><span class="art">${{ "AI 答题": ICON.pen, "AI 考试": ICON.pen, 每日复习: ICON.repeat, 问答区答题: ICON.chat, 问答区提问: ICON.chat }[job.title] || ICON.play}</span>
         <span class="what"><small><span class="live">${waiting || LIVE_WORD[job.title] || "进行中"}</span>${esc(job.course_name)}</small>
         <b>${esc(waiting || run.unit?.name || run.detail || "准备中…")}</b></span></div>
       <div class="scrub"><span class="track ${pct == null ? "unknown" : ""}"><i style="width:${pct ?? 0}%"></i></span><span class="t">${esc(label || clock(elapsed(job)))}</span></div>
@@ -1513,7 +1518,10 @@ async function startJob(body) {
     // Show it now; the stream's copy may come later (or already came, or the job already ended).
     const job = started.job;
     if (job && !state.jobs.some((j) => j.id === job.id) && !state.history.some((j) => j.id === job.id)) handleEvent({ ...job, type: "job" });
-    if (body.type === "answer") { delete state.papers[key(body.platform, body.course)]; state.selected[key(body.platform, body.course)] = new Set(); }
+    if (["answer", "exam"].includes(body.type)) {
+      const k = key(body.platform, body.course, body.type === "exam");
+      delete state.papers[k]; state.selected[k] = new Set();
+    }
     return true;
   } catch (error) { toast(error.message); return false; }
 }
@@ -1568,6 +1576,7 @@ function handleEvent(event) {
       toast(`${event.title} · ${event.summary || STATE_WORD[event.state] || "结束"}`);
       finishUnits(event);
       delete state.papers[key(event.platform, event.course)];
+      delete state.papers[key(event.platform, event.course, true)];
       delete state.earned[key(event.platform, event.course)];
       delete state.qaPosts[key(event.platform, event.course)];
       delete state.qaRoom[key(event.platform, event.course)];
@@ -1788,6 +1797,7 @@ async function refreshState(catchUp = false) {
       const ended = state.history.find((h) => h.id === gone.id);
       if (ended) finishUnits(ended);
       delete state.papers[key(gone.platform, gone.course)];
+      delete state.papers[key(gone.platform, gone.course, true)];
     }
     state.jobs = live;
     for (const job of live) markLive(key(job.platform, job.course));
@@ -1874,9 +1884,9 @@ document.addEventListener("click", (event) => {
   const filter = t.closest("[data-filter]"); if (filter) { state.logFilter = filter.dataset.filter; renderFocus(); }
   const papersRetry = t.closest("[data-papers-retry]");
   if (papersRetry) {
-    const [pid, ...rest] = papersRetry.dataset.papersRetry.split(":"), p = platformOf(pid), c = courseOf(pid, rest.join(":"));
+    const [pid, cid, kind] = papersRetry.dataset.papersRetry.split(":"), p = platformOf(pid), c = courseOf(pid, cid);
     delete state.paperErrors[papersRetry.dataset.papersRetry];
-    if (p && c) loadPapers(p, c);
+    if (p && c) loadPapers(p, c, kind === "exam", true);
     repaint();
   }
   const retry = t.closest("[data-units-retry]");

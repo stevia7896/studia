@@ -1,5 +1,23 @@
 # 新版考试接口核对记录
 
+## 学习通考试（2026-11-17）
+
+`ChaoxingMain/exam.py` 新增网页版学习通考试。复用 `ChaoxingApi` 登录 Cookie 和 `ChaoxingExerciseRunner` 的 AI 调用、图片处理及答案校验；不新增模型配置、登录流程或依赖。
+
+结构核对依据（公开实现，非真实账号验证）：
+
+- [CxStudy 课程考试目录](https://github.com/Yu-dongxing/CxStudy/blob/7ad1f13f627aca55622afef9f22c50a4951b6e61/cxapi/classes.py)：GET `/exam/phone/task-list`，`ul.nav > li[data]`，课程/班级/cpi、考试 ID、状态及 `enc_task`。
+- [CxStudy 考试页面协议](https://github.com/Yu-dongxing/CxStudy/blob/7ad1f13f627aca55622afef9f22c50a4951b6e61/cxapi/exam.py)：`submitTest`、`questionWrap.singleQuesId.ans-cc-exam`、`phone/loadAnswerStatic`、`phone/preview`，以及 `test/reVersionSubmitTestNew` 的确认响应。
+- [chaoxing-go 的考试解析检查](https://github.com/hyskr/chaoxing-go/blob/4c9396df4c745a3b1de60a9a7f999bc53f0fc02a/internal/chaoxing/exam_test.go)：显示选项字母与提交用的原始键可能不同。
+
+目录和作业分别缓存，考试不会通过作业入口被默认全选；每次启动重新读目录确认可用性。网页 GET `/api/platforms/cx/exams?course=...` 仅返回目录，POST `/api/jobs` 的 `type=exam` 只接受一份已读取的考试。计时、开考和保存/交卷由平台控制；点击确认后才打开考试封面。验证码、人脸识别、考试码、承诺书和专用客户端要求交给用户处理，不复制参考实现的验证绕过逻辑。
+
+Playwright 复用当前用户的 Cookie，仅打开受支持的超星 HTTPS 考试域。读取答题卡与整卷预览并核对题数，再调用当前启用的 AI 模型。单选/多选保留「显示字母 → 原始提交键」映射，填空按控件分开填写并保留已填的空。单题写入前重新确认题目和已有答案，点击官方页面的保存按钮，让页面生成自己的动态签名。每次保存检查业务 `status=success` 和页面更新后的会话参数，保存结束后重新读取整卷确认答案。只有全部题目可确认已答且用户选择交卷时，才点击交卷；原生或可识别的页面交卷确认框由该授权处理。交卷后再读目录，确认状态为已完成/已提交/已交卷才报告成功。未知确认框、富文本编辑器或控件变化会停止并提示到平台核对。
+
+本地剩余时间只会收紧，不会刷新重置或伪造答题时间。超时或用户停止后不再主动写入。保存/提交不自动重试，未知结果停止，考试任务不随服务重启自动恢复。`tests/test_chaoxing_exam.py` 使用合成目录、题目、临时本机服务器和真实 Chromium，覆盖选项映射、已有答案、多空填空、只保存、完整交卷、未答完、拒绝响应、超时以及网页选择隔离。**尚未使用真实学习通账号验证开考和交卷，也未消耗任何真实考试机会。**
+
+以下章节记录智慧职教协议。
+
 核对日期：2026-10-10。以下是静态阅读公开网页资源得到的协议记录，不代表真实账号端到端验证。
 
 ## 来源

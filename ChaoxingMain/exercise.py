@@ -145,6 +145,10 @@ def encode_answer(question, answer):
             raise ValueError("填空题答案为空")
         if any(not isinstance(part, str) or not part.strip() for part in parts):
             raise ValueError("填空题答案有空项")
+        if "blank_count" in question:  # 考试每个空有自己的控件，不能像章节作业一样拼接。
+            if len(parts) != question["blank_count"]:
+                raise ValueError("填空题答案数量与空数不符")
+            return [old if old.strip() else new.strip() for old, new in zip(question["existing_answer"], parts)]
         return "".join(part.strip() for part in parts)
     if kind == "shortanswer":
         if not isinstance(answer, str) or not answer.strip():
@@ -218,14 +222,17 @@ class ChaoxingExerciseRunner:
         logger.info("%s：%s", name, message)
         return self._result(name, "submitted" if submit else "saved", message)
 
-    def _answer_all(self, name, questions):
+    def _answer_all(self, name, questions, *, check=None):
         values, problems = {}, {}
         for index, question in enumerate(questions):
+            if check:
+                check()
             if self.cancel_event.is_set():
                 return values, problems
             self.reporter.questions(name, index, len(questions))
-            if (question.get("existing_answer") or "").strip():
-                values[question["id"]] = question["existing_answer"]
+            existing = question.get("existing_answer") or ""
+            if (all(part.strip() for part in existing) if isinstance(existing, list) else existing.strip()):
+                values[question["id"]] = existing
                 continue
             problem = unsupported_reason(question)
             if problem:
@@ -241,6 +248,8 @@ class ChaoxingExerciseRunner:
                 if images and pictures is None:
                     raise ValueError("题目图片无法下载或不是有效图片，需要人工处理")
                 media = {"images": pictures} if pictures else {}
+                if check:
+                    check()
                 response = self.ai_client.answer(asked, **media)
                 try:
                     values[question["id"]] = encode_answer(question, response["answer"])
@@ -248,6 +257,8 @@ class ChaoxingExerciseRunner:
                     # 和 MOOC、智慧树一致：没把握（null）或格式不对就再问一次，要它给出最可能的答案；
                     # 一道题空着，覆盖率不够就整份不交。
                     logger.info("%s：第 %d 题 AI 没给出可用答案（%s），改为让它给出最可能的答案", name, index + 1, error)
+                    if check:
+                        check()
                     response = self.ai_client.answer(asked, guess=True, **media)
                     values[question["id"]] = encode_answer(question, response["answer"])
             except AIServiceError:
