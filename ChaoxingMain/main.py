@@ -5,6 +5,7 @@
 一个 unit，界面如何显示由调用方决定。
 """
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from ai.client import AIServiceError
 from base.auth import AuthenticationExpired, PlatformUnavailable
@@ -17,6 +18,16 @@ logger = Logger(__name__).get_log()
 
 DONE = ("submitted", "saved")
 UNIT_STATE = {"skipped": "skipped"}
+# ponytail: 章节卡片逐章串行要几十秒；并行读，但超星 WAF 对突发请求敏感，只开 4 路。被 403 时调小。
+CATALOG_WORKERS = 4
+
+
+def _chapter_jobs(client, course, include_finished=False):
+    """每个章节和它的 (jobs, job_info)，按章节顺序返回；章节之间并行读取（纯读取）。"""
+    points = client.course_points(course)["points"]
+    with ThreadPoolExecutor(CATALOG_WORKERS) as pool:
+        return list(zip(points, pool.map(
+            lambda point: client.job_list(course, point, include_finished=include_finished), points)))
 
 
 def catalog(client, course):
@@ -27,8 +38,7 @@ def catalog(client, course):
     平台不提供作业的提交状态（workid 卡片的 isPassed 不可靠），所以如实标成未知。
     """
     entries = []
-    for point in client.course_points(course)["points"]:
-        jobs, job_info = client.job_list(course, point)
+    for point, (jobs, job_info) in _chapter_jobs(client, course):
         for job in jobs:
             if job["type"] != "workid":
                 continue
@@ -58,12 +68,13 @@ def course_units(client, course):
             logger.debug("读取课程状态失败：%s", name, exc_info=True)
             return None
 
-    nodes = status("course_nodes") or {}
-    job_status = status("job_status_ids")
+    with ThreadPoolExecutor(2) as pool:  # 两份状态和章节卡片同时读
+        nodes, job_status = pool.submit(status, "course_nodes"), pool.submit(status, "job_status_ids")
+        walked = _chapter_jobs(client, course, include_finished=True)
+        nodes, job_status = nodes.result() or {}, job_status.result()
     finished, unfinished = job_status if job_status else (set(), set())
     chapters = []
-    for point in client.course_points(course)["points"]:
-        jobs, _ = client.job_list(course, point, include_finished=True)
+    for point, (jobs, _) in walked:
         counts = nodes.get(str(point.get("id"))) if isinstance(nodes, dict) else None
         all_done = (counts.get("unfinish", 0) == 0 and counts.get("finish", 0) > 0
                     if counts else bool(point.get("has_finished")))

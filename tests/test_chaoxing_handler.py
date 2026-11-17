@@ -81,6 +81,20 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(item["_completion_status"], "unknown")
         self.assertEqual(category, 1)
 
+    def test_chapters_are_read_in_parallel_and_kept_in_order(self):
+        import threading
+        points = [{"id": str(i), "title": "第%d章" % i} for i in range(4)]
+        both_in = threading.Barrier(2, timeout=5)  # 串行读取时第一章会一直等不到第二章
+
+        class SlowClient(FakeClient):
+            def job_list(self, course, point, include_finished=False):
+                if point["id"] in ("0", "1"):
+                    both_in.wait()
+                return [dict(JOB, jobid="w" + point["id"])], {}
+
+        entries = catalog(SlowClient(points=points), COURSE)
+        self.assertEqual([item["jobid"] for _, item, _ in entries], ["w0", "w1", "w2", "w3"])
+
     def test_units_leave_out_chapter_works(self):
         # 作业在「AI 答题」里做；只有作业的章节不进学习格子。
         self.assertEqual(course_units(FakeClient(), COURSE), [])
