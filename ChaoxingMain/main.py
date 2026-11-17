@@ -42,20 +42,28 @@ def _status(client, course, name):
         return None
 
 
+def _chapter_done(point, nodes):
+    """整章任务点都完成：优先 gas/clazz 计数，取不到再看章节页的完成标志。"""
+    counts = nodes.get(str(point.get("id"))) if isinstance(nodes, dict) else None
+    return counts.get("unfinish", 0) == 0 and counts.get("finish", 0) > 0 if counts else bool(point.get("has_finished"))
+
+
 def catalog(client, course, submitted=()):
     """这门课所有章节里的作业，给终端 / 网页的任务列表用。
 
     每条是 ``(course, item, category)``；item 除了任务本身，还带上作答要用的
     ``_point`` 和 ``_job_info``，这样选中的作业可以单独交给 runner.run()。
 
-    打开作业页会建草稿，不能拿来查状态；workid 卡片的 isPassed 也不可靠。完成状态按顺序取：
-    studia 自己交卷成功的记录（``submitted``，jobid 集合）→ 手机端已完成 / 未完成任务点
-    列表 → 都没有就如实标成未知。
+    打开作业页会建草稿，不能拿来查状态；workid 卡片上也没有完成字段。完成状态按顺序取：
+    studia 自己交卷成功的记录（``submitted``，jobid 集合）→ 章节已完成（章节页标志或
+    gas/clazz 计数，整章任务点都完成，作业自然也交了）→ 手机端已完成 / 未完成任务点
+    列表 → 都没有就如实标成未知。真实账号上手机端列表和 gas/clazz 都可能是空的，
+    章节页标志是唯一一定有的来源。
     """
-    with ThreadPoolExecutor(1) as pool:
-        job_status = pool.submit(_status, client, course, "job_status_ids")
+    with ThreadPoolExecutor(2) as pool:
+        nodes, job_status = pool.submit(_status, client, course, "course_nodes"), pool.submit(_status, client, course, "job_status_ids")
         walked = _chapter_jobs(client, course)
-        finished, unfinished = job_status.result() or (set(), set())
+        nodes, (finished, unfinished) = nodes.result() or {}, job_status.result() or (set(), set())
     entries = []
     for point, (jobs, job_info) in walked:
         for job in jobs:
@@ -64,7 +72,7 @@ def catalog(client, course, submitted=()):
             name = job.get("name") or point.get("title") or "章节作业"
             # 手机端列表里的 id 可能带也可能不带 work- 前缀，两种都认。
             ids = {job["jobid"], job["jobid"].replace("work-", "", 1)}
-            status = ("submitted" if job["jobid"] in submitted or ids & finished
+            status = ("submitted" if job["jobid"] in submitted or _chapter_done(point, nodes) or ids & finished
                       else "draft" if ids & unfinished else "unknown")
             entries.append((course, dict(
                 job, id=job["jobid"], name=name, _point=point, _job_info=job_info, _completion_status=status,
@@ -87,9 +95,7 @@ def course_units(client, course):
     finished, unfinished = job_status if job_status else (set(), set())
     chapters = []
     for point, (jobs, _) in walked:
-        counts = nodes.get(str(point.get("id"))) if isinstance(nodes, dict) else None
-        all_done = (counts.get("unfinish", 0) == 0 and counts.get("finish", 0) > 0
-                    if counts else bool(point.get("has_finished")))
+        all_done = _chapter_done(point, nodes)
         units = []
         for job in jobs:
             if job["type"] == "workid":

@@ -93,6 +93,19 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(hints["work-done"], "")
         self.assertIn("完成状态", hints["work-other"])
 
+    def test_finished_chapter_means_its_homework_is_in(self):
+        # 真实账号：手机端列表和 gas/clazz 都是空的，只有章节页的完成标志。
+        points = [dict(POINT, id="1", has_finished=True), dict(POINT, id="2", has_finished=False),
+                  dict(POINT, id="3", has_finished=False)]
+
+        class Client(FakeClient):
+            def job_list(self, course, point, include_finished=False):
+                return [dict(JOB, jobid="work-" + point["id"])], {}
+
+        client = Client(points=points, nodes={"3": {"finish": 2, "unfinish": 0}})
+        status = {item["jobid"]: item["_completion_status"] for _, item, _ in catalog(client, COURSE)}
+        self.assertEqual(status, {"work-1": "submitted", "work-2": "unknown", "work-3": "submitted"})
+
     def test_status_endpoint_failure_keeps_the_list(self):
         class Broken(FakeClient):
             def job_status_ids(self, course):
