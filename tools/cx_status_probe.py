@@ -65,6 +65,13 @@ def main():
                 if "workid" in (str(card.get("type")), str(prop.get("type"))) or str(card.get("jobid", "")).startswith("work-"):
                     works[card.get("jobid")] = (point.get("title"), card)
 
+    nodes = client.course_nodes(course)
+    print("\n== 每章完成计数（%d 章；finish 已完成 / unfinish 未完成；章节页标志 has_finished）==" % len(nodes))
+    for point in client.course_points(course)["points"]:
+        counts = nodes.get(str(point.get("id"))) or {}
+        print("%s  finish=%s unfinish=%s has_finished=%s" % (
+            point.get("title"), counts.get("finish", "?"), counts.get("unfinish", "?"), point.get("has_finished")))
+
     print("\n== 章节作业卡片（%d 份）==" % len(works))
     for jobid, (chapter, card) in works.items():
         print("\n[%s] %s" % (chapter, (card.get("property") or {}).get("title")))
