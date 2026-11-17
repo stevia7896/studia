@@ -34,6 +34,7 @@ from base.auth import AuthenticationExpired, PlatformUnavailable
 from base.quiet_hours import CHECKPOINTS, QUIET_MESSAGE, quiet_hours
 from ChaoxingMain.api import ChaoxingApi, ChaoxingError, LoginError, WorkUnavailable
 from ChaoxingMain.exercise import ChaoxingExerciseRunner
+from ChaoxingMain.exam import ChaoxingExamRunner, ExamNeedsUser, catalog as cx_exam_catalog
 from ChaoxingMain.main import catalog as cx_catalog, course_units as cx_units
 from ChaoxingMain.study import ChaoxingStudyHandler
 from NewMoocMain.oauth_login import oauth_login
@@ -63,11 +64,11 @@ MAX_PENDING = 20
 SHARED_MODEL_ID = "admin-shared"
 # The platform's unit and paper lists take seconds to tens of seconds; reuse them for a while.
 CACHE_TTL = 600
-LABEL = {"study": "自动学习", "review": "每日复习", "meeting": "见面课", "answer": "AI 答题", "qa": "问答区答题", "ask": "问答区提问",
+LABEL = {"study": "自动学习", "review": "每日复习", "meeting": "见面课", "answer": "AI 答题", "exam": "AI 考试", "qa": "问答区答题", "ask": "问答区提问",
          "mastery": "掌握度学习"}
 # Jobs that play course content conflict with each other; answering is separate.
 # Answering the board and asking on it are separate lines, so drafting questions never waits out an answering run.
-GROUP = {"study": "learn", "review": "learn", "meeting": "learn", "answer": "answer", "mastery": "answer", "qa": "qa", "ask": "ask"}
+GROUP = {"study": "learn", "review": "learn", "meeting": "learn", "answer": "answer", "exam": "answer", "mastery": "answer", "qa": "qa", "ask": "ask"}
 QA_POSTS = 300  # posts kept per account for the web list
 PEER_ANSWERS = 5  # a question with 5 valid answers earns its asker the point; more from us adds nothing
 PEER_DELAY = 30 * 60  # seconds a classmate's question waits before people here answer it
@@ -156,7 +157,7 @@ class Platform:
                 "password": bool(spec.get("password")), "logged_in": logged_in, "rescan": rescan,
                 "rescan_at": rescan_at,
                 "features": {"study": spec.get("study", True), "answer": spec["answer"],
-                             "review": spec["review"], "qa": bool(spec.get("qa"))}}
+                             "review": spec["review"], "qa": bool(spec.get("qa")), "exam": self.id == "cx"}}
 
 
 class Studia:
@@ -608,22 +609,25 @@ class Studia:
         platform.cache[key] = (time.time(), value)
         return value
 
-    def tasks(self, pid, course_id, fresh=False):
+    def tasks(self, pid, course_id, fresh=False, *, exams=False):
         platform = self.platform(pid)
+        if exams and pid != "cx":
+            raise HttpError(400, "独立考试入口目前仅支持学习通")
         if not platform.spec["answer"]:
             raise HttpError(400, "%s 的网页版答题还在接入中，请先用终端版" % platform.spec["name"])
         row = self.find_row(platform, course_id)
-        listed, result = self._cached(platform, ("tasks", course_id), fresh, lambda: self._read_tasks(platform, row))
+        cache_key = ("exams" if exams else "tasks", course_id)
+        listed, result = self._cached(platform, cache_key, fresh, lambda: self._read_tasks(platform, row, exams=exams))
         with self.lock:
-            platform.entries[course_id] = listed
+            platform.entries[cache_key if exams else course_id] = listed
         return {"tasks": result}
 
-    def _read_tasks(self, platform, row):
+    def _read_tasks(self, platform, row, *, exams=False):
         pid = platform.id
         client = self.client(platform)
         try:
             if pid == "cx":
-                entries = cx_catalog(client, row)
+                entries = cx_exam_catalog(client, row) if exams else cx_catalog(client, row)
             elif pid == "zhs":
                 entries = catalog(client, row)
             else:
@@ -633,7 +637,7 @@ class Studia:
         except CaptchaRequired as exc:
             raise HttpError(409, str(exc))
         except ChaoxingError as exc:
-            raise HttpError(502, str(exc) or "作业列表读取失败")
+            raise HttpError(502, str(exc) or "试卷列表读取失败")
         except ExamError as exc:
             raise HttpError(502, str(exc) or "试卷列表读取失败")
         listed = {}
@@ -692,6 +696,7 @@ class Studia:
         allowed = ({"study"} if platform.spec.get("study", True) else set()) | \
                   ({"review"} if platform.spec["review"] else set()) | \
                   ({"answer"} if platform.spec["answer"] else set()) | \
+                  ({"exam"} if platform.id == "cx" else set()) | \
                   ({"mastery", "meeting"} if platform.id == "zhs" else set()) | \
                   ({"qa", "ask"} if platform.spec.get("qa") else set())
         if kind not in allowed:
@@ -718,8 +723,16 @@ class Studia:
                    "resumes": resumes}
             if resumes:
                 job["lines"].append({"text": "服务更新后自动继续", "level": "", "time": time.strftime("%H:%M")})
-            if kind == "answer":
-                selected = self._selected(platform, course_id, body.get("tasks") or [])
+            if kind in ("answer", "exam"):
+                if kind == "exam" and not isinstance(body.get("auto_submit", False), bool):
+                    raise HttpError(400, "交卷选项必须为 true 或 false")
+                selected = self._selected(platform, ("exams", course_id) if kind == "exam" else course_id, body.get("tasks"))
+                if kind == "exam":
+                    if len(selected) != 1:
+                        raise HttpError(400, "每次只能选择一场考试")
+                    availability = task_availability(selected[0][1], selected[0][2])
+                    if not availability.available:
+                        raise HttpError(400, availability.reason)
                 target = lambda: self._answer(platform, selected, bool(body.get("auto_submit")), job)
             elif kind == "mastery":
                 target = lambda: self._mastery(platform, row, job)
@@ -948,10 +961,11 @@ class Studia:
 
     def _selected(self, platform, course_id, task_ids):
         entries = platform.entries.get(course_id) or {}
-        selected = [entries[str(task_id)] for task_id in task_ids if str(task_id) in entries]
-        if not selected:
+        if (not isinstance(task_ids, list) or not task_ids
+                or any(not isinstance(task_id, str) or task_id not in entries for task_id in task_ids)
+                or len(set(task_ids)) != len(task_ids)):
             raise HttpError(400, "请先选择试卷（试卷列表可能已过期，请刷新）")
-        return selected
+        return [entries[task_id] for task_id in task_ids]
 
     def _take_turn(self, job):
         """Start a waiting job when this person has a free place; first come, first served, unless an
@@ -1001,7 +1015,7 @@ class Studia:
                 state, summary = "stopped", "已停止"
         except KeyboardInterrupt:
             state, summary = "stopped", "已停止"
-        except (CaptchaRequired, StudyTimeLimit, NeedsRetry) as exc:
+        except (CaptchaRequired, StudyTimeLimit, NeedsRetry, ExamNeedsUser) as exc:
             # Only the user can clear these: solve the captcha on the platform, or come back tomorrow.
             state, summary = "waiting", str(exc) or "平台要求验证"
         except AuthenticationExpired:
@@ -1014,6 +1028,7 @@ class Studia:
                 # The job changed this course's progress and papers; read them afresh next time.
                 platform.cache.pop(("units", job["course"]), None)
                 platform.cache.pop(("tasks", job["course"]), None)
+                platform.cache.pop(("exams", job["course"]), None)
                 for stale in [k for k in platform.cache if k[0] == "earned"]:  # points may have moved
                     platform.cache.pop(stale, None)
                 self.save_sessions(platform)
@@ -1110,7 +1125,7 @@ class Studia:
             # A paused job does not run by itself, so it comes back however long the service was down.
             paused = entry.get("paused") is True and GROUP[kind] == "learn"
             night = entry.get("night_paused") is True
-            if kind in ("answer", "mastery", "qa", "ask") or (not paused and not night and (not fresh or entry.get("resumes", 0) >= RESUME_LIMIT)):
+            if kind in ("answer", "exam", "mastery", "qa", "ask") or (not paused and not night and (not fresh or entry.get("resumes", 0) >= RESUME_LIMIT)):
                 self._record(entry, "stopped", INTERRUPTED)
                 continue
             body = {"platform": entry.get("platform"), "type": kind, "course": entry.get("course")}
@@ -1223,7 +1238,11 @@ class Studia:
         ai = self._ai("请先在设置里添加 AI 模型")
         try:
             workers = self.store.concurrency()["ai"]
-            if platform.id == "cx":
+            if platform.id == "cx" and job.get("kind") == "exam":
+                runner = ChaoxingExamRunner(self.client(platform), ai, auto_submit=auto_submit,
+                                           on_progress=on_progress, cancel_event=cancel, cover_rate=1)
+                run_paper, unit = runner.run_paper, "场考试"
+            elif platform.id == "cx":
                 runner = ChaoxingExerciseRunner(self.client(platform), ai, auto_submit=auto_submit,
                                                 on_progress=on_progress, cancel_event=cancel)
                 unit = "份作业"
@@ -1242,7 +1261,7 @@ class Studia:
                                       auto_submit=auto_submit, on_progress=on_progress, max_workers=workers,
                                       memory=self.mooc_memory or MoocAnswerMemory(Path(self.store.path).parent / "mooc-answers.json"))
                 run_paper, unit = runner.run_paper, "份试卷"
-            self.progress_event(job, "begin", "AI 答题", total=len(selected), unit=unit)
+            self.progress_event(job, "begin", job.get("title", "AI 答题"), total=len(selected), unit=unit)
             done = 0
             for course, item, category in selected:
                 if cancel.is_set():
@@ -1251,7 +1270,7 @@ class Studia:
                     or ("作业" if platform.id == "cx" else "试卷")
                 try:
                     result = run_paper(course, item, category)
-                except (CaptchaRequired, StudyTimeLimit):
+                except (CaptchaRequired, StudyTimeLimit, ExamNeedsUser):
                     self.progress_event(job, "result", name, status="waiting")
                     raise
                 except (TaskUnavailableError, WorkUnavailable) as exc:
@@ -1269,6 +1288,10 @@ class Studia:
                 if result.get("message"):
                     self.publish({"type": "log", "text": f"{name}：{result['message']}", "job": job["id"],
                                   "level": "error" if status in ("error", "ai_error") else ""})
+                if job.get("kind") == "exam":
+                    if status not in ("submitted", "saved") and not cancel.is_set():
+                        raise NeedsRetry(result.get("message") or "考试未完成，请到学习通核对")
+                    return result.get("message") or STATUS_TEXT.get(status, status)
                 done += status in ("submitted", "saved", "preview")
                 if result.get("stop_queue") or status in ("ai_error", "submission_unknown", "submitting", "paused"):
                     break
@@ -1829,6 +1852,7 @@ ROUTES = [
     ("POST", r"/api/platforms/(\w+)/qa/draft", lambda app, m, q, b: app.qa_draft(m[1], b)),
     ("GET", r"/api/platforms/(\w+)/score", lambda app, m, q, b: app.score(m[1], (q.get("course") or [""])[0], (q.get("fresh") or [""])[0] == "1")),
     ("GET", r"/api/platforms/(\w+)/tasks", lambda app, m, q, b: app.tasks(m[1], (q.get("course") or [""])[0], (q.get("fresh") or [""])[0] == "1")),
+    ("GET", r"/api/platforms/(\w+)/exams", lambda app, m, q, b: app.tasks(m[1], (q.get("course") or [""])[0], (q.get("fresh") or [""])[0] == "1", exams=True)),
     ("GET", r"/api/jobs", lambda app, m, q, b: app.jobs_state()),
     ("POST", r"/api/jobs", lambda app, m, q, b: app.start_job(b)),
     ("POST", r"/api/jobs/stop", lambda app, m, q, b: app.stop_job((b or {}).get("id"))),

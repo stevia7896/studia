@@ -9,7 +9,7 @@ const platforms = [
     rescan_at: new URLSearchParams(location.search).has("rescan") ? null
       : Date.now() / 1000 + (new URLSearchParams(location.search).has("soon") ? 40 * 60 : 6 * 3600),
     features: { study: true, answer: true, review: true, qa: true } },
-  { id: "cx", name: "超星", short: "超星", login: "qr", password: true, logged_in: true, features: { study: true, answer: true, review: false } },
+  { id: "cx", name: "超星", short: "超星", login: "qr", password: true, logged_in: true, features: { study: true, answer: true, exam: true, review: false } },
 ];
 const courses = {
   mooc: [{ id: "m1", platform: "mooc", name: "大学英语（二）", type: "第 7 期开课", kind: "mooc", progress: 62 }, { id: "m2", platform: "mooc", name: "中外音乐与民族技艺实践", type: "第 3 期开课", kind: "mooc", progress: 100 }],
@@ -36,6 +36,11 @@ const tasks = [
 const cxTasks = [
   { id: "work-a", name: "1.1 章节测验", category: "作业", status: "状态未知", score: null, available: true, hint: "平台不提供这份作业的提交状态；已完成的作业请不要再勾选" },
   { id: "work-b", name: "1.2 章节作业", category: "作业", status: "状态未知", score: null, available: true, hint: "平台不提供这份作业的提交状态；已完成的作业请不要再勾选" },
+];
+const cxExams = [
+  { id: "exam-1", name: "期中考试", category: "考试", status: "未作答", score: null, available: true, done: false, hint: "考试时长 60 分钟" },
+  { id: "exam-2", name: "期末考试", category: "考试", status: "未开始", score: null, available: false, done: false, reason: "考试尚未开始，请在学习通核对。" },
+  { id: "exam-3", name: "第一单元考试", category: "考试", status: "已提交", score: null, available: false, done: true, reason: "考试已提交。" },
 ];
 const jobs = {};
 let polls = 0;
@@ -76,7 +81,7 @@ const units = {
     ["复用技术", 5], ["计算机网络的发展历程", 6], ["网络体系结构", 7], ["物理层", 6], ["数据链路层", 8], ["网络层", 9], ["传输层", 7], ["应用层", 6]], 66),
 };
 
-const GROUP = { study: "learn", review: "learn", answer: "answer", mastery: "answer", qa: "qa", ask: "ask" };
+const GROUP = { study: "learn", review: "learn", answer: "answer", exam: "answer", mastery: "answer", qa: "qa", ask: "ask" };
 let qaPeersOn = false;
 const qaPosts = [{ kind: "answer", question: "云计算的三种服务模式有什么区别？", text: "IaaS 提供虚拟机等基础设施，PaaS 提供运行平台，SaaS 直接提供软件。", at: Date.now() / 1000 - 7200 }];
 function fakeJob(body) {
@@ -86,7 +91,7 @@ function fakeJob(body) {
     if (o.course === body.course) throw new Error(`这门课正在${o.title}，请等它结束或先停止`);
     if (body.platform === "zhs" && GROUP[body.type] === "learn") throw new Error(`智慧树同一账号同时只能播放一个视频，请等「${o.course_name}」的${o.title}结束`);
   }
-  const title = { study: "自动学习", review: "每日复习", answer: "AI 答题", mastery: "掌握度学习", qa: "问答区答题", ask: "问答区提问" }[body.type];
+  const title = { study: "自动学习", review: "每日复习", answer: "AI 答题", exam: "AI 考试", mastery: "掌握度学习", qa: "问答区答题", ask: "问答区提问" }[body.type];
   const job = { type: "job", kind: body.type, id: "j" + Date.now().toString(16), title, course: body.course, course_name: course.name, platform: body.platform,
     state: "running", summary: "", started: Date.now() / 1000, ended: null, lines: [] };
   jobs[job.id] = job;
@@ -129,13 +134,14 @@ function fakeJob(body) {
     }, 1200 * (i + 1)));
     return job.id;
   }
-  if (body.type === "answer") {
-    const steps = (body.tasks || []).map((id) => tasks.find((t) => t.id === id)?.name || "试卷");
+  if (["answer", "exam"].includes(body.type)) {
+    const list = body.type === "exam" ? cxExams : body.platform === "cx" ? cxTasks : tasks;
+    const steps = (body.tasks || []).map((id) => list.find((t) => t.id === id)?.name || "试卷");
     send({ type: "progress", kind: "begin", name: title, total: steps.length, unit: "份试卷" });
     steps.forEach((step, i) => setTimeout(() => {
       send({ type: "progress", kind: "detail", name: step });
       send({ type: "progress", kind: "questions", name: step, completed: 10, total: 10, unit: "题" });
-      send({ type: "progress", kind: "result", name: step, status: body.auto_submit ? "submitted" : "preview" });
+      send({ type: "progress", kind: "result", name: step, status: body.auto_submit ? "submitted" : body.type === "exam" ? "saved" : "preview" });
       if (i === steps.length - 1) setTimeout(() => finish("done", `处理完成 ${steps.length}/${steps.length} 份试卷`), 800);
     }, 1500 * (i + 1)));
     return job.id;
@@ -199,6 +205,7 @@ export async function request(path, method, body) {
   if ((m = path.match(/^\/api\/platforms\/(\w+)\/logout$/))) { platforms.find((x) => x.id === m[1]).logged_in = false; return {}; }
   if ((m = path.match(/^\/api\/platforms\/(\w+)\/courses$/))) return { courses: courses[m[1]] };
   if ((m = path.match(/^\/api\/platforms\/(\w+)\/tasks/))) return { tasks: m[1] === "cx" ? cxTasks : tasks };
+  if (path.startsWith("/api/platforms/cx/exams")) return { tasks: cxExams };
   if ((m = path.match(/^\/api\/platforms\/\w+\/units\?course=(.+)$/))) return { chapters: units[decodeURIComponent(m[1])] || [] };
   if ((m = path.match(/^\/api\/platforms\/\w+\/qa\?course=(.+)$/))) return { posts: qaPosts.slice().reverse(),
     room: { ask: 4, answer: 7, posted: { ask: 1, answer: 3 }, why: { ask: "今天问满了，明天再来", answer: "今天答满了，明天再来" } }, peers: qaPeersOn };
