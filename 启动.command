@@ -3,8 +3,19 @@
 # 第一次运行会自动安装依赖，需要几分钟；之后几秒就能起来。
 # 这个终端窗口要一直开着，关掉它网页版就停了。按 Ctrl+C 退出。
 
-cd "$(dirname "$0")" || exit 1
+SELF="${0:A}"
+cd "$(dirname "$SELF")" || exit 1
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# 每次启动先跟进 GitHub 上的最新版本；拉到新代码后用新脚本重新开始。
+if [[ -z "$STUDIA_UPDATED" && -d .git ]] && command -v git >/dev/null 2>&1; then
+  echo "检查更新..."
+  if git pull --ff-only --quiet; then
+    export STUDIA_UPDATED=1
+    exec /bin/zsh "$SELF"
+  fi
+  echo "更新失败（没联网，或本地改过代码），先用当前版本启动。"
+fi
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "没有找到 uv。先装一下："

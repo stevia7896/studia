@@ -3,6 +3,17 @@ chcp 65001 >nul
 title Studia
 cd /d "%~dp0"
 
+rem 每次启动先跟进 GitHub 上的最新版本。git 会改写这个文件，所以拉取和重新启动放在同一个括号块里，
+rem cmd 整块读完才执行，不会读到改了一半的脚本。
+if not "%~1"=="--updated" if exist .git (
+  where git >nul 2>nul && (
+    echo 检查更新...
+    git pull --ff-only --quiet || echo 更新失败（没联网，或本地改过代码），先用当前版本启动。
+    "%~f0" --updated
+    exit /b
+  )
+)
+
 where uv >nul 2>nul
 if errorlevel 1 (
   echo 没有找到 uv，先安装：
