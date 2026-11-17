@@ -19,6 +19,7 @@ from web.server import HttpError, Studia, STATIC, INTERRUPTED
 
 COURSE = {"courseId": "111", "clazzId": "222", "cpi": "333", "title": "考试测试课程"}
 ENTRY = "/exam-ans/exam/phone/task-exam?taskrefId=900&enc_task=token&courseId=111&classId=222&cpi=333"
+MOBILE_ENTRY = "/exam-ans/android/mtaskmsgspecial?taskrefId=900&enc_task=token&courseId=111&clazzId=222"
 ITEM = {"id": "exam-900", "exam_id": "900", "name": "期中考试", "_exam_url": "https://mooc1-api.chaoxing.com" + ENTRY}
 
 
@@ -59,6 +60,28 @@ class ExamParsingTest(unittest.TestCase):
             self.assertIn("_unavailable", item)
             self.assertEqual(item["_completion_status"] == "submitted", status == "已完成")
         self.assertEqual(decode_exam_list("<p>暂无考试</p>", COURSE), [])
+
+    def test_completed_and_closed_exams_need_no_answering_url(self):
+        for status in ("已完成", "已提交", "已交卷", "未开始", "已截止", "未知状态"):
+            for entry in ("", "javascript:void(0)", MOBILE_ENTRY.replace("&enc_task=token", ""),
+                          "/exam-ans/exam/phone/look?taskrefId=900", "https://[invalid"):
+                with self.subTest(status=status, entry=entry):
+                    item = decode_exam_list(exam_list(status, entry), COURSE)[0][1]
+                    self.assertIn("_unavailable", item)
+                    self.assertNotIn("_exam_url", item)
+                    self.assertEqual(item["_completion_status"] == "submitted", status in ("已完成", "已提交", "已交卷"))
+                    if "taskrefId=900" in entry:
+                        self.assertEqual(item["id"], "exam-900")
+
+    def test_official_mobile_entry_and_class_identity(self):
+        item = decode_exam_list(exam_list(entry=MOBILE_ENTRY), COURSE)[0][1]
+        self.assertEqual(item["_exam_url"], "https://mooc1-api.chaoxing.com" + MOBILE_ENTRY)
+        self.assertNotIn("_unavailable", item)
+        for entry in (MOBILE_ENTRY.replace("clazzId=222", "clazzId=999"),
+                      MOBILE_ENTRY + "&classId=999", MOBILE_ENTRY.replace("&enc_task=token", ""),
+                      MOBILE_ENTRY.replace("mtaskmsgspecial", "unrecognized")):
+            with self.subTest(entry=entry), self.assertRaises(ChaoxingError):
+                decode_exam_list(exam_list(entry=entry), COURSE)
 
     def test_unknown_lists_wrong_courses_and_external_urls_fail_closed(self):
         for page in ("<html>服务异常</html>", exam_list(entry=ENTRY.replace("111", "999")),
@@ -106,6 +129,23 @@ class ExamWebTest(unittest.TestCase):
         self.platform.rows, self.platform.client = [COURSE], Mock()
         self.addCleanup(patch.stopall)
         patch("web.server.quiet_hours", return_value={"active": False}).start()
+
+    def test_completed_entries_do_not_hide_available_exams_or_restart(self):
+        completed = exam_list("已完成", MOBILE_ENTRY.replace("&enc_task=token", ""))
+        pending = exam_list(entry=ENTRY.replace("900", "901"))
+        self.platform.client._request.return_value.text = completed.replace("</ul>", "") + pending.replace('<ul class="nav">', "")
+        tasks = self.app.tasks("cx", "111-222", exams=True)["tasks"]
+        self.assertEqual([t["id"] for t in tasks], ["exam-900", "exam-901"])
+        self.assertEqual([t["available"] for t in tasks], [False, True])
+        self.assertEqual([t["done"] for t in tasks], [True, False])
+        self.assertEqual(tasks[0]["status"], "已提交")
+        self.platform.client._request.assert_called_once()
+        runner = ChaoxingExamRunner(self.platform.client, Mock())
+        with patch.object(runner, "_open") as opened:
+            result = runner.run_paper(COURSE, ITEM)
+        self.assertEqual(result["status"], "skipped")
+        opened.assert_not_called()
+        runner.ai_client.answer.assert_not_called()
 
     def test_lists_are_separate_and_malformed_selections_do_not_start_jobs(self):
         with patch("web.server.cx_exam_catalog", return_value=[(COURSE, ITEM, 2)]) as exams, \
@@ -192,7 +232,8 @@ class ExamBrowserTest(unittest.TestCase):
                     mime = "text/javascript" if path.suffix == ".js" else "text/css" if path.suffix == ".css" else "text/html"
                     self.send(path.read_text(), mime + "; charset=utf-8")
                 elif url.path.endswith("/task-list"):
-                    self.send(exam_list("已完成" if test.submitted else "未交", test.base + ENTRY))
+                    entry = MOBILE_ENTRY.replace("&enc_task=token", "") if test.submitted else ENTRY
+                    self.send(exam_list("已完成" if test.submitted else "未交", test.base + entry))
                 elif url.path.endswith("/task-exam"):
                     self.send('<script>const hiddenTip="人脸识别";</script><button onclick="location.href=\'/exam-ans/exam/phone/start\'">开始考试</button>')
                 elif url.path.endswith("/start"):
