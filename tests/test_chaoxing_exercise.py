@@ -229,8 +229,16 @@ class RunnerTest(unittest.TestCase):
         result = runner(client, ai, auto_submit=True).run(COURSE, POINT, JOB, JOB_INFO)
         self.assertEqual(len(ai.asked), 1)
         self.assertEqual(result["status"], "saved")
-        self.assertIn("1 题未作答", result["message"])
+        self.assertIn("1 题未作答（暂不支持题型 9）", result["message"])
         self.assertEqual(client.payloads[0]["answerq6"], "")
+
+    def test_text_subtypes_are_answered_as_short_answers(self):
+        page = work_page(question_block("n", "5", "名词：熵", ()), question_block("c", "7", "算 2+2", ()))
+        client, ai = FakeClient(page), FakeAI({"名词：熵": "无序度的量度", "算 2+2": "4"})
+        result = runner(client, ai, auto_submit=True).run(COURSE, POINT, JOB, JOB_INFO)
+        self.assertEqual(result["status"], "submitted")
+        self.assertEqual([q["type"] for q in ai.asked], ["问答题（名词解释）", "问答题（计算题）"])
+        self.assertEqual((client.payloads[0]["answern"], client.payloads[0]["answerc"]), ("无序度的量度", "4"))
 
     def test_platform_rejection_is_error(self):
         client = FakeClient(work_page(SINGLE), confirmation={"status": False, "msg": "作业已提交"})

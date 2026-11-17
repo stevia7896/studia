@@ -10,6 +10,7 @@
 """
 import re
 import threading
+from collections import Counter
 import time
 from html import unescape
 from urllib.parse import urljoin
@@ -32,6 +33,9 @@ TYPE_NAMES = {
     "completion": "填空题",
     "shortanswer": "问答题",
 }
+
+# 同为问答题作答，题型名告诉模型该写定义、论述还是算出结果。
+TEXT_SUBTYPES = {"5": "名词解释", "6": "论述题", "7": "计算题"}
 
 TRUE_WORDS = {"true", "正确", "对", "是", "√", "t", "yes", "y"}
 FALSE_WORDS = {"false", "错误", "错", "否", "×", "不对", "不正确", "f", "no", "n"}
@@ -73,7 +77,8 @@ def model_question(question, images=None):
         return rendered
 
     return {
-        "type": TYPE_NAMES.get(question["type"], "题目"),
+        "type": TYPE_NAMES.get(question["type"], "题目") + (
+            "（%s）" % TEXT_SUBTYPES[question["type_code"]] if question["type_code"] in TEXT_SUBTYPES else ""),
         "title": prompt_title(text(question["title"])),
         "options": [{"label": option["label"], "text": prompt_body(text(option["text"]))}
                     for option in question["options"]],
@@ -209,7 +214,7 @@ class ChaoxingExerciseRunner:
         if not confirmation.get("status"):
             action = "提交" if submit else "保存"
             return self._result(name, "error", "%s失败：%s" % (action, confirmation.get("msg") or "平台未确认"))
-        message = self._summary(len(values), len(questions), submit, len(problems))
+        message = self._summary(len(values), len(questions), submit, problems)
         logger.info("%s：%s", name, message)
         return self._result(name, "submitted" if submit else "saved", message)
 
@@ -280,7 +285,9 @@ class ChaoxingExerciseRunner:
             action = "已保存，未交卷"
         message = "%s · 作答 %d/%d 题（覆盖率 %.0f%%）" % (action, answered, total, coverage)
         if unanswered:
-            message += "；%d 题未作答" % unanswered
+            reasons = Counter(unanswered.values())
+            message += "；%d 题未作答（%s）" % (len(unanswered), "；".join(
+                reason if count == 1 else "%s ×%d" % (reason, count) for reason, count in reasons.items()))
         return message
 
     @staticmethod

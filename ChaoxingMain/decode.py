@@ -27,6 +27,10 @@ QUESTION_TYPES = {
     "2": "completion",
     "3": "judgement",
     "4": "shortanswer",
+    # 名词解释 / 论述 / 计算和简答一样是 answer{id} 文本框；控件不符时下面的已有答案检查会拦下。
+    "5": "shortanswer",
+    "6": "shortanswer",
+    "7": "shortanswer",
 }
 
 _CHOICE_NOISE = re.compile(r"[\r\t\n]")
