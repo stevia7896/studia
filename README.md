@@ -59,6 +59,16 @@ git clone https://github.com/stevia7896/studia.git
 
 本机首次使用需安装浏览器：`uv run playwright install --only-shell chromium`；Docker 镜像已包含。此功能已通过离线模拟页面测试，尚未用真实账号验证交卷，首次使用建议选「保存答案（不交卷）」并在学习通核对。
 
+## 更新
+
+关掉启动窗口，在 `studia` 文件夹里打开终端：
+
+```bash
+git pull
+```
+
+再双击启动文件即可，新依赖会自动安装。登录状态和模型配置都保留。改过代码导致 `git pull` 报冲突的话，先 `git stash` 再拉。
+
 ---
 
 更多说明见 [docs/USAGE.md](docs/USAGE.md)。代码基于 [yijunjie07/studia](https://github.com/yijunjie07/studia)。
