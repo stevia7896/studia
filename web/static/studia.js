@@ -1286,7 +1286,7 @@ function renderCourse(p, c, tab, full = false) {
     const categories = [...new Set(papers.map((x) => x.category))].sort((a, b) => rank(a) - rank(b));
     const n = selected.size;
     const cxNote = exam ? `<div class="notice">每次选择一场考试，开始作答可能启动平台倒计时。「保存答案」不会交卷；选择自动交卷时，仅在全部题目答完并保存成功后提交。考试码、人脸验证或专用客户端要求请在学习通完成。<button class="link" data-papers-retry="${esc(pk)}">刷新考试列表</button></div>`
-      : p.id === "cx" ? '<div class="notice">超星不提供章节作业的提交状态，请到平台确认哪些还没做，只勾选要作答的。</div>' : "";
+      : p.id === "cx" && papers.some((x) => x.status === "状态未知") ? '<div class="notice">标着「状态未知」的作业，平台没有返回完成情况，请到学习通确认还没做再勾选。</div>' : "";
     body = cxNote + (categories.map((label) => {
       const list = papers.filter((x) => x.category === label), open = list.filter((x) => x.available);
       const all = open.length && open.every((x) => selected.has(x.id));

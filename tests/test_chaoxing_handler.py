@@ -81,6 +81,24 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(item["_completion_status"], "unknown")
         self.assertEqual(category, 1)
 
+    def test_completion_comes_from_local_record_then_platform_lists(self):
+        jobs = [dict(JOB, jobid="work-" + name) for name in ("mine", "done", "todo", "other")]
+        client = FakeClient(jobs=jobs, finished={"done"}, unfinished={"work-todo", "mine"})
+        entries = catalog(client, COURSE, submitted={"work-mine"})
+        status = {item["jobid"]: item["_completion_status"] for _, item, _ in entries}
+        # 本地交卷记录优先（作业已交但没及格时，平台仍算任务点未完成）；手机端 id 带不带 work- 都认。
+        self.assertEqual(status, {"work-mine": "submitted", "work-done": "submitted",
+                                  "work-todo": "draft", "work-other": "unknown"})
+        hints = {item["jobid"]: item["_hint"] for _, item, _ in entries}
+        self.assertEqual(hints["work-done"], "")
+        self.assertIn("完成状态", hints["work-other"])
+
+    def test_status_endpoint_failure_keeps_the_list(self):
+        class Broken(FakeClient):
+            def job_status_ids(self, course):
+                raise RuntimeError("WAF")
+        self.assertEqual(catalog(Broken(), COURSE)[0][1]["_completion_status"], "unknown")
+
     def test_chapters_are_read_in_parallel_and_kept_in_order(self):
         import threading
         points = [{"id": str(i), "title": "第%d章" % i} for i in range(4)]

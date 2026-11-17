@@ -627,7 +627,7 @@ class Studia:
         client = self.client(platform)
         try:
             if pid == "cx":
-                entries = cx_exam_catalog(client, row) if exams else cx_catalog(client, row)
+                entries = cx_exam_catalog(client, row) if exams else cx_catalog(client, row, self._cx_submitted(client))
             elif pid == "zhs":
                 entries = catalog(client, row)
             else:
@@ -1282,6 +1282,8 @@ class Studia:
                 except ExamError as exc:
                     result = {"status": "error", "message": str(exc), "stop_queue": isinstance(exc, ExamServiceError)}
                 status = result["status"]
+                if platform.id == "cx" and job.get("kind") == "answer" and status == "submitted":
+                    self._remember_cx_submitted(self.client(platform), item["jobid"])
                 if status == "ai_error":
                     self.store.save_ai_health(ai.config, "error", result.get("message", "AI 服务失败"))
                 self.progress_event(job, "result", name, status=status)
@@ -1437,6 +1439,42 @@ class Studia:
         else:
             marker.unlink(missing_ok=True)
         return {"peers": self.sharing_qa()}
+
+    def _cx_submitted_path(self):
+        return Path(self.store.path).parent / "cx-submitted.json"
+
+    def _cx_submitted(self, client):
+        """Chaoxing homework this site handed in for the signed-in account: {user id: [jobid, ...]}."""
+        try:
+            data = json.loads(self._cx_submitted_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        ids = data.get(client.user_id()) if isinstance(data, dict) else None
+        return set(ids) if isinstance(ids, list) else set()
+
+    def _remember_cx_submitted(self, client, jobid):
+        user = client.user_id()
+        if not user:
+            return  # without the account cookie the record could land on someone else's list
+        with self.lock:
+            path = self._cx_submitted_path()
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            ids = data.get(user) if isinstance(data.get(user), list) else []
+            if jobid in ids:
+                return
+            data[user] = ids + [jobid]
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                os.replace(temporary, path)
+            except OSError as exc:  # the homework is already in; only the label on our list is lost
+                logger.warning("记录已交作业失败：%s", exc)
 
     def _posts_path(self):
         return Path(self.store.path).parent / "zhs-qa-posts.json"

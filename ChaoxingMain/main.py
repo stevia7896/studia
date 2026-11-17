@@ -30,23 +30,45 @@ def _chapter_jobs(client, course, include_finished=False):
             lambda point: client.job_list(course, point, include_finished=include_finished), points)))
 
 
-def catalog(client, course):
+def _status(client, course, name):
+    """平台状态接口是锦上添花：方法缺失或读取失败都返回 None，不拖垮列表。"""
+    method = getattr(client, name, None)
+    if not callable(method):
+        return None
+    try:
+        return method(course)
+    except Exception:
+        logger.debug("读取课程状态失败：%s", name, exc_info=True)
+        return None
+
+
+def catalog(client, course, submitted=()):
     """这门课所有章节里的作业，给终端 / 网页的任务列表用。
 
     每条是 ``(course, item, category)``；item 除了任务本身，还带上作答要用的
     ``_point`` 和 ``_job_info``，这样选中的作业可以单独交给 runner.run()。
-    平台不提供作业的提交状态（workid 卡片的 isPassed 不可靠），所以如实标成未知。
+
+    打开作业页会建草稿，不能拿来查状态；workid 卡片的 isPassed 也不可靠。完成状态按顺序取：
+    studia 自己交卷成功的记录（``submitted``，jobid 集合）→ 手机端已完成 / 未完成任务点
+    列表 → 都没有就如实标成未知。
     """
+    with ThreadPoolExecutor(1) as pool:
+        job_status = pool.submit(_status, client, course, "job_status_ids")
+        walked = _chapter_jobs(client, course)
+        finished, unfinished = job_status.result() or (set(), set())
     entries = []
-    for point, (jobs, job_info) in _chapter_jobs(client, course):
+    for point, (jobs, job_info) in walked:
         for job in jobs:
             if job["type"] != "workid":
                 continue
             name = job.get("name") or point.get("title") or "章节作业"
+            # 手机端列表里的 id 可能带也可能不带 work- 前缀，两种都认。
+            ids = {job["jobid"], job["jobid"].replace("work-", "", 1)}
+            status = ("submitted" if job["jobid"] in submitted or ids & finished
+                      else "draft" if ids & unfinished else "unknown")
             entries.append((course, dict(
-                job, id=job["jobid"], name=name, _point=point, _job_info=job_info,
-                _completion_status="unknown",
-                _hint="平台不提供这份作业的提交状态；已完成的作业请不要再勾选"), 1))
+                job, id=job["jobid"], name=name, _point=point, _job_info=job_info, _completion_status=status,
+                _hint="平台没有返回这份作业的完成状态；已完成的作业请不要再勾选" if status == "unknown" else ""), 1))
     return entries
 
 
@@ -58,18 +80,8 @@ def course_units(client, course):
     状态接口不可用时采用章节完成标志，再用卡片 isPassed 兜底——文档/PPT 的
     卡片标志经常不更新，即使章节页已经确认完成。
     """
-    def status(name):
-        method = getattr(client, name, None)
-        if not callable(method):
-            return None
-        try:
-            return method(course)
-        except Exception:  # 状态接口失败不能拖垮课程页
-            logger.debug("读取课程状态失败：%s", name, exc_info=True)
-            return None
-
     with ThreadPoolExecutor(2) as pool:  # 两份状态和章节卡片同时读
-        nodes, job_status = pool.submit(status, "course_nodes"), pool.submit(status, "job_status_ids")
+        nodes, job_status = pool.submit(_status, client, course, "course_nodes"), pool.submit(_status, client, course, "job_status_ids")
         walked = _chapter_jobs(client, course, include_finished=True)
         nodes, job_status = nodes.result() or {}, job_status.result()
     finished, unfinished = job_status if job_status else (set(), set())

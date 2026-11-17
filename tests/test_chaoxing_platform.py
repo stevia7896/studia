@@ -189,6 +189,24 @@ class WebTaskTest(unittest.TestCase):
         self.assertIn("份作业", summary)
         ai.session.close.assert_called_once()
 
+    def test_homework_handed_in_here_shows_as_submitted_for_that_account_only(self):
+        other = dict(self.item, id="work-def", jobid="work-def")
+        runner = Mock()
+        runner.run.side_effect = [{"paper": "1.1", "status": "submitted", "message": "已交卷"},
+                                  {"paper": "1.2", "status": "saved", "message": "已保存"}]
+        ai = Mock(config=AIConfig("https://example.org/v1", "model", "key"))
+        self.platform.client.user_id.return_value = "u1"
+        with patch("web.server.ChaoxingExerciseRunner", return_value=runner), \
+                patch.object(Studia, "_ai", return_value=ai):
+            self.app._answer(self.platform, [(dict(CX_COURSE), self.item, 1), (dict(CX_COURSE), other, 1)], True,
+                             {"id": "job1", "kind": "answer", "cancel": threading.Event()})
+        self.assertEqual(self.app._cx_submitted(self.platform.client), {"work-abc"})  # 只保存的不算交卷
+        with patch("web.server.cx_catalog", return_value=[]) as read:
+            self.app.tasks("cx", "111-222")
+        self.assertEqual(read.call_args.args[2], {"work-abc"})
+        self.platform.client.user_id.return_value = "u2"
+        self.assertEqual(self.app._cx_submitted(self.platform.client), set())
+
     def test_unavailable_work_is_skipped_and_the_queue_continues(self):
         other = dict(self.item, id="work-def", jobid="work-def")
         runner = Mock()
