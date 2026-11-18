@@ -179,6 +179,7 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
         name = item["name"]
         self._pw = self._browser = self.page = None
         self.deadline = None
+        self.answer_id = None
         self.course, self.item = course, item
         self.writing = False
         try:
@@ -219,7 +220,8 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
                     return self._result(name, "submission_unknown", "平台尚未确认已交卷，请在学习通核对；不会自动重交")
                 self.writing = False
                 return self._result(name, "submitted", "考试已交卷 · %d/%d 题" % (saved, len(questions)))
-            reasons = "；".join(dict.fromkeys(problems.values()))
+            reasons = "；".join("第 %d 题：%s" % (index + 1, problems[question["id"]])
+                                for index, question in enumerate(questions) if question["id"] in problems)
             return self._result(name, "saved" if saved else "error", "已保存 %d/%d 题，未交卷%s" % (
                 saved, len(questions), "；" + reasons if reasons else ""))
         except (ExamNeedsUser, AuthenticationExpired):
@@ -289,6 +291,10 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
                 raise ChaoxingError("试卷身份与所选考试不符，未保存")
         if any(not fields.get(k) for k in ("testUserRelationId", "enc", "encRemainTime", "encLastUpdateTime")):
             raise ChaoxingError("考试会话参数缺失，未保存")
+        answer_id = fields["testUserRelationId"]
+        if self.answer_id is not None and answer_id != self.answer_id:
+            raise ExamNeedsUser("考试作答记录发生变化，已停止操作，请在学习通核对")
+        self.answer_id = answer_id
         remaining = fields.get("remainTime", "")
         if not remaining.isdigit():
             raise ChaoxingError("无法读取考试剩余时间，未保存")

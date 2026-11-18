@@ -119,6 +119,26 @@ class ExamParsingTest(unittest.TestCase):
         with self.assertRaises(ExamNeedsUser):
             runner._check()
 
+    def test_session_cannot_switch_to_another_attempt_of_the_same_exam(self):
+        runner = ChaoxingExamRunner(Mock(), Mock())
+        runner.course, runner.item = COURSE, ITEM
+        runner.deadline = None
+        runner.answer_id = None
+        runner.page = Mock(url=ITEM["_exam_url"])
+
+        def form(answer_id):
+            fields = {"courseId": "111", "classId": "222", "testPaperId": "900",
+                      "testUserRelationId": answer_id, "enc": "token", "encRemainTime": "3600",
+                      "encLastUpdateTime": "123", "remainTime": "3600"}
+            inputs = "".join('<input id="%s" value="%s">' % pair for pair in fields.items())
+            return '<form id="submitTest">%s</form>' % inputs
+
+        runner._html = Mock(return_value=form("700"))
+        runner._session()
+        runner._html.return_value = form("701")
+        with self.assertRaisesRegex(ExamNeedsUser, "作答记录发生变化"):
+            runner._session()
+
 
 class ExamWebTest(unittest.TestCase):
     def setUp(self):
@@ -328,6 +348,7 @@ class ExamBrowserTest(unittest.TestCase):
         result = self.run_exam()
         self.assertEqual(result["status"], "saved")
         self.assertIn("4/5", result["message"])
+        self.assertIn("第 5 题", result["message"])
         self.assertFalse(self.submitted)
 
     def test_rejected_save_is_not_retried(self):
