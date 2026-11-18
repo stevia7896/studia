@@ -191,22 +191,26 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
                 raise WorkUnavailable(availability.reason)
             self._open(fresh["_exam_url"])
             questions = self._questions()
-            values, problems = self._answer_all(name, questions, check=self._check)
-            saved = 0
+            values, problems = {}, {}
             for index, question in enumerate(questions):
                 self._check()
-                value = values.get(question["id"])
-                if value is None:
-                    continue
-                if value != question["existing_answer"]:
-                    self._goto_question(index)
-                    (current,) = decode_exam_questions(self._html())
-                    if current != question:
-                        raise ExamNeedsUser("作答过程中题目或已有答案发生变化，请在学习通核对")
-                    self._fill(question, value)
-                    self._submit(False)
-                saved += 1
-                self.reporter.detail("已保存 %d/%d 题" % (saved, len(questions)))
+                self.reporter.questions(name, index, len(questions))
+                question_values, question_problems = self._answer_all(
+                    name, [question], check=self._check, report_progress=False)
+                values.update(question_values)
+                problems.update(question_problems)
+                value = question_values.get(question["id"])
+                if value is not None:
+                    if value != question["existing_answer"]:
+                        self._goto_question(index)
+                        (current,) = decode_exam_questions(self._html())
+                        if current != question:
+                            raise ExamNeedsUser("作答过程中题目或已有答案发生变化，请在学习通核对")
+                        self._fill(question, value)
+                        self._submit(False)
+                self.reporter.questions(name, index + 1, len(questions))
+            saved = len(values)
+            self.reporter.detail("逐题作答完成 · 已保存 %d/%d 题" % (saved, len(questions)))
             # 已填答案也要回读；不根据 HTTP 200 或页面按钮点击推断成功。
             verified = self._questions()
             if [q["id"] for q in verified] != [q["id"] for q in questions] or any(
@@ -222,8 +226,9 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
                 return self._result(name, "submitted", "考试已交卷 · %d/%d 题" % (saved, len(questions)))
             reasons = "；".join("第 %d 题：%s" % (index + 1, problems[question["id"]])
                                 for index, question in enumerate(questions) if question["id"] in problems)
-            return self._result(name, "saved" if saved else "error", "已保存 %d/%d 题，未交卷%s" % (
-                saved, len(questions), "；" + reasons if reasons else ""))
+            unanswered = len(questions) - saved
+            summary = "已保存并核对 %d/%d 题 · 未答 %d 题，未交卷" % (saved, len(questions), unanswered)
+            return self._result(name, "saved" if saved else "error", summary + ("；" + reasons if reasons else ""))
         except (ExamNeedsUser, AuthenticationExpired):
             raise
         except WorkUnavailable as exc:

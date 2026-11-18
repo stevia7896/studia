@@ -222,14 +222,15 @@ class ChaoxingExerciseRunner:
         logger.info("%s：%s", name, message)
         return self._result(name, "submitted" if submit else "saved", message)
 
-    def _answer_all(self, name, questions, *, check=None):
+    def _answer_all(self, name, questions, *, check=None, report_progress=True):
         values, problems = {}, {}
         for index, question in enumerate(questions):
             if check:
                 check()
             if self.cancel_event.is_set():
                 return values, problems
-            self.reporter.questions(name, index, len(questions))
+            if report_progress:
+                self.reporter.questions(name, index, len(questions))
             existing = question.get("existing_answer") or ""
             if (all(part.strip() for part in existing) if isinstance(existing, list) else existing.strip()):
                 values[question["id"]] = existing
@@ -270,7 +271,8 @@ class ChaoxingExerciseRunner:
             except ValueError as error:
                 problems[question["id"]] = str(error)
                 logger.warning("%s：第 %d 题答案无效：%s", name, index + 1, error)
-        self.reporter.questions(name, len(questions), len(questions))
+        if report_progress:
+            self.reporter.questions(name, len(questions), len(questions))
         return values, problems
 
     @staticmethod

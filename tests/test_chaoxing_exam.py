@@ -194,6 +194,7 @@ class ExamWebTest(unittest.TestCase):
         self.assertEqual(client.call_args.args[0], config)
         self.assertIs(factory.call_args.args[1], ai)
         self.assertFalse(factory.call_args.kwargs["auto_submit"])
+        ai.check_connection.assert_called_once_with()
         runner.run_paper.assert_called_once_with(COURSE, ITEM, 2)
         self.assertEqual(result, "已保存")
         ai.session.close.assert_called_once()
@@ -337,6 +338,23 @@ class ExamBrowserTest(unittest.TestCase):
         self.assertEqual(len(self.posts), 5)
         self.assertEqual(self.ai.answer.call_count, 4)
         self.assertEqual(self.starts, 1)
+
+    def test_each_answer_is_saved_before_the_next_ai_request(self):
+        answers = {"单选": "B", "多选": ["A", "B"], "判断": True,
+                   "填空": ["更改", "新"], "简答": "简答内容"}
+        saved_before_request = []
+
+        def answer(question, **kwargs):
+            saved_before_request.append(len(self.posts))
+            return {"answer": answers[question["title"]], "explanation": ""}
+
+        self.ai.answer.side_effect = answer
+        result = self.run_exam()
+
+        self.assertEqual(result["status"], "submitted", result)
+        self.assertEqual(saved_before_request, [0, 1, 2, 3, 4])
+        self.assertEqual(sum(p["tempSave"] == ["true"] for p in self.posts), 5)
+        self.assertEqual(sum(p["tempSave"] == ["false"] for p in self.posts), 1)
 
     def test_save_only_and_partial_papers_never_submit(self):
         self.runner.auto_submit = False
