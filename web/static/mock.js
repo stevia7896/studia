@@ -30,7 +30,6 @@ const tasks = [
   { id: "t2", name: "第五章单元测试", category: "作业", status: "已提交", score: 8, available: true, hint: "重做成绩会覆盖当前成绩（当前 8/10），剩余重做 1 次。", redo_left: 1 },
   { id: "t3", name: "第一章单元测试", category: "作业", status: "已满分", score: 10, available: false, reason: "已满分，无需重做。" },
   { id: "t5", name: "第十章单元测试", category: "作业", status: "已提交", score: 8, available: true, hint: "剩余重做 3 次", redo_left: 3 },
-  { id: "t4", name: "新一代信息技术导论教程考试", category: "考试", status: "未开考", score: null, available: false, reason: "考试需要先在网页上手动开考" },
 ];
 // 超星不提供作业提交状态，预览里保留一条「状态未知」。
 const cxTasks = [
@@ -48,7 +47,7 @@ let zhsSpeedup = false;
 const models = [
   { id: "builtin-default", provider: "默认供应商", model: "gemini-3.8-flash", base_url: "https://mochif.com/v1", key_hint: "sk-…gTjW", active: true, health: "ok", health_message: "", deletable: false },
   { id: "legacy", provider: "mochif", model: "gemini-3.8-flash", base_url: "https://mochif.com/v1", key_hint: "sk-…PJlj", active: false, health: "", health_message: "", deletable: true },
-  { id: "p2", provider: "DeepSeek 官方", model: "deepseek-v4.1-flash", base_url: "https://api.deepseek.com/v1", key_hint: "sk-…77c1", active: false, health: "error", health_message: "401 鉴权失败", deletable: true },
+  { id: "p2", provider: "DeepSeek 官方", model: "deepseek-v4-flash", base_url: "https://api.deepseek.com/v1", key_hint: "sk-…77c1", active: false, health: "error", health_message: "401 鉴权失败", deletable: true },
 ];
 const history = [
   { id: "h4", title: "AI 答题", course: "shared-1", course_name: "新一代信息技术导论", platform: "zhs", state: "done", summary: "处理完成 7/7 份试卷",
