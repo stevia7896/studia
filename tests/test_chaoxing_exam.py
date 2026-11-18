@@ -349,6 +349,24 @@ class ExamBrowserTest(unittest.TestCase):
     def run_exam(self):
         return self.runner.run_paper(COURSE, ITEM)
 
+    def test_submitted_redo_papers_are_not_selected_by_default_or_select_all(self):
+        from playwright.sync_api import expect, sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            page.goto(self.base + "/?mock#/course/mooc/m1/answer")
+
+            expect(page.locator("[data-paper]")).to_have_count(4)
+            expect(page.locator("[data-paper].on")).to_have_count(0)
+            expect(page.locator("[data-pick-all]")).to_have_count(0)
+            expect(page.locator('[data-paper="t1"]')).to_have_attribute("aria-disabled", "false")
+            page.locator('[data-paper="t1"]').click()
+            expect(page.locator("[data-paper].on")).to_have_count(1)
+            expect(page.locator('[data-paper="t1"]')).to_contain_text("可重做")
+
+            browser.close()
+
     def test_real_browser_preserves_existing_answers_saves_and_submits_once(self):
         self.answers["101"] = "C"
         result = self.run_exam()

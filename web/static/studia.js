@@ -117,6 +117,10 @@ function focusedJob() {
 const platformOf = (pid) => state.platforms.find((p) => p.id === pid);
 const key = (pid, cid, exam = false) => `${pid}:${cid}${exam ? ":exam" : ""}`;
 const selectedOf = (k) => (state.selected[k] = state.selected[k] || new Set());
+const canSelectPaper = (paper) => paper.available && !paper.done &&
+  (paper.status !== "已提交" || paper.redo || paper.redo_left != null);
+const canBulkSelectPaper = (paper) => canSelectPaper(paper) && !paper.redo &&
+  paper.status !== "已提交" && paper.status !== "状态未知";
 const courseOf = (pid, cid) => (state.courses[pid] || []).find((c) => c.id === cid);
 const go = (hash) => { if (location.hash !== hash) location.hash = hash; else route(); };
 
@@ -1225,7 +1229,7 @@ function renderCourse(p, c, tab, full = false) {
   const k = key(p.id, c.id);
   const exam = tab === "exam", pk = key(p.id, c.id, exam);
   const papers = state.papers[pk];
-  const answerOpen = (state.papers[k] || []).filter((x) => x.available && !x.done).length;
+  const answerOpen = (state.papers[k] || []).filter(canBulkSelectPaper).length;
   const answerBlock = blocker(p.id, c.id, "answer");
   const head = `
     <section class="hero">
@@ -1268,7 +1272,7 @@ function renderCourse(p, c, tab, full = false) {
     body = failed ? `<div class="empty">${esc(failed)} · <button class="link" data-papers-retry="${esc(pk)}">重试</button></div>` : `<div class="empty">正在读取${exam ? "考试" : "试卷"}…</div>`;
   } else {
     const selected = selectedOf(pk);
-    for (const id of selected) if (!papers.some((x) => x.id === id && x.available)) selected.delete(id);
+    for (const id of selected) if (!papers.some((x) => x.id === id && canSelectPaper(x))) selected.delete(id);
     const row = (x) => {
       const on = selected.has(x.id);
       const pill = !x.available ? ""
@@ -1276,7 +1280,8 @@ function renderCourse(p, c, tab, full = false) {
         : x.redo ? '<span class="pill blue">可重做</span>'
         : x.done ? `<span class="pill">已提交</span>` : "";
       const note = x.reason || (x.redo_left != null ? "重做会覆盖当前成绩" : x.hint) || (x.available ? x.status : "");
-      return `<button class="paper ${on ? "on" : ""} ${x.available ? "" : "off"}" data-paper="${esc(x.id)}" aria-pressed="${on}" aria-disabled="${!x.available}">
+      const canSelect = canSelectPaper(x);
+      return `<button class="paper ${on ? "on" : ""} ${canSelect ? "" : "off"}" data-paper="${esc(x.id)}" aria-pressed="${on}" aria-disabled="${!canSelect}">
         <span class="box">${on ? ICON.tick : ""}</span><span class="stamp ${STAMP[x.category] || ""}">${esc((x.category || "作")[0])}</span>
         <span class="pname"><b>${esc(x.name)}</b><small title="${esc(x.hint || note)}">${esc(note)}</small></span>
         <span>${pill}</span>
@@ -1289,10 +1294,10 @@ function renderCourse(p, c, tab, full = false) {
     const cxNote = exam ? `<div class="notice">每次选择一场考试，开始作答可能启动平台倒计时。「保存答案」不会交卷；选择自动交卷时，仅在全部题目答完并保存成功后提交。考试码、人脸验证或专用客户端要求请在学习通完成。<button class="link" data-papers-retry="${esc(pk)}">刷新考试列表</button></div>`
       : p.id === "cx" && papers.some((x) => x.status === "状态未知") ? '<div class="notice">标着「状态未知」的作业，平台没有返回完成情况，请到学习通确认还没做再勾选。</div>' : "";
     body = cxNote + (categories.map((label) => {
-      const list = papers.filter((x) => x.category === label), open = list.filter((x) => x.available);
-      const all = open.length && open.every((x) => selected.has(x.id));
+      const list = papers.filter((x) => x.category === label), open = list.filter(canSelectPaper);
+      const bulk = open.filter(canBulkSelectPaper), all = bulk.length && bulk.every((x) => selected.has(x.id));
       return `<div class="section"><h3>${esc(label)}</h3><span class="aside">${open.length} / ${list.length} ${exam ? "场" : "份"}可选</span>
-          ${!exam && open.length > 1 ? `<button class="link" data-pick-all="${esc(label)}">${all ? "取消全选" : "全选"}</button>` : ""}</div>
+          ${!exam && bulk.length > 1 ? `<button class="link" data-pick-all="${esc(label)}">${all ? "取消全选" : "全选"}</button>` : ""}</div>
         <div class="papers">${list.map(row).join("")}</div>`;
     }).join("") || `<div class="empty">${exam ? "这门课暂无考试" : "这门课没有作业、测验或考试"}</div>`);
     if (categories.length) body += `<div class="dock"><span class="info">${answerBlock ? esc(answerBlock) : n ? `已选 <b>${n}</b> ${exam ? "场 · 开始前需再次确认" : "份 · 交卷前会再确认一次"}` : exam ? "选择要参加的考试" : "勾选要作答的试卷"}</span>
@@ -1336,14 +1341,14 @@ function renderCourse(p, c, tab, full = false) {
   if (tab === "qa") loadQaPosts(p, c);
   page.querySelectorAll("[data-paper]").forEach((el) => (el.onclick = () => {
     const x = papers.find((y) => String(y.id) === el.dataset.paper);
-    if (!x.available) { toast(x.reason || "这份试卷暂不可选"); return; }
+    if (!canSelectPaper(x)) { toast(x.reason || "这份试卷已提交或暂不可选"); return; }
     const selected = selectedOf(pk), on = selected.has(x.id);
     if (exam) selected.clear();
     on ? selected.delete(x.id) : selected.add(x.id);
     renderCourse(p, c, tab);
   }));
   page.querySelectorAll("[data-pick-all]").forEach((el) => (el.onclick = () => {
-    const open = papers.filter((x) => x.category === el.dataset.pickAll && x.available), selected = selectedOf(pk);
+    const open = papers.filter((x) => x.category === el.dataset.pickAll && canBulkSelectPaper(x)), selected = selectedOf(pk);
     const all = open.every((x) => selected.has(x.id));
     open.forEach((x) => (all ? selected.delete(x.id) : selected.add(x.id)));
     renderCourse(p, c, tab);
@@ -1368,7 +1373,8 @@ async function loadPapers(p, c, exam = false, fresh = false) {
     state.papers[k] = papers;
     delete state.paperErrors[k];
     const selected = selectedOf(k);
-    if (!exam && !selected.size) papers.filter((x) => x.available && !x.done && x.status !== "状态未知").forEach((x) => selected.add(x.id));
+    for (const paper of papers) if (paper.done || paper.status === "已提交") selected.delete(paper.id);
+    if (!exam && !selected.size) papers.filter(canBulkSelectPaper).forEach((x) => selected.add(x.id));
   } catch (error) {
     // A failed read is not an empty course: keep it unloaded so a retry or the next login reads it again.
     delete state.papers[k];
