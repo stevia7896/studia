@@ -186,7 +186,7 @@ python -m ChaoxingMain --course 246831735 --study --speed 1.5 --jobs 4 --notopen
 支持 **OpenAI 兼容的 Chat Completions API 和 Responses API**，保存测试时自动识别并记住可用接口，无需手动选择格式。供应商名称只是显示标签；原生 Gemini、Anthropic 协议仍不支持。旧配置已指定的接口格式继续生效，默认供应商使用预设接口。
 
 - 自定义兼容接口：地址填写 `https://服务商地址/v1`，模型填写服务商提供的 Model ID。程序先测试 Chat Completions，只有服务明确表示接口不支持时才尝试 Responses；HTTP 401、余额不足、超时、普通参数错误和模型不存在不会触发切换。也可填写完整 `/chat/completions` 或 `/responses` 地址，直接指定对应接口。
-- DeepSeek：地址填写 `https://api.deepseek.com`，模型填写 `deepseek-chat` 或 `deepseek-reasoner`，Key 使用该服务商的密钥。
+- DeepSeek：地址填写 `https://api.deepseek.com`，模型填写 `deepseek-v4-flash`（或更强的 `deepseek-v4-pro`），Key 使用该服务商的密钥。
 
 编辑自定义模型时原供应商名称、地址和模型已填好，Key 留空保留；换接口地址必须填写新 Key。修改地址、模型或 Key 会在保存测试时重新识别接口；仅改供应商名称保留已识别结果。删除入口位于编辑页，需要确认。删除当前模型后须重新选择一个模型才能答题，程序不会自动换用其他服务。
 
