@@ -478,10 +478,7 @@ class ChaoxingApi:
 
     def job_status_ids(self, course):
         """(已完成, 未完成) 的 jobid 集合；给网页任务卡片展示用。"""
-        with ThreadPoolExecutor(2) as pool:
-            finished = pool.submit(self.finished_job_ids, course)
-            unfinished = pool.submit(self.unfinished_job_ids, course)
-            return finished.result(), unfinished.result()
+        return self.finished_job_ids(course), self.unfinished_job_ids(course)
 
     # ------------------------------------------------------------------ 学习
 

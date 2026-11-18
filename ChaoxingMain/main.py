@@ -4,7 +4,9 @@
 阅读、直播任务不在范围内。进度沿用 studia 的报告约定：每门课一个 result，每份作业
 一个 unit，界面如何显示由调用方决定。
 """
+import random
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from ai.client import AIServiceError
@@ -18,16 +20,26 @@ logger = Logger(__name__).get_log()
 
 DONE = ("submitted", "saved")
 UNIT_STATE = {"skipped": "skipped"}
-# ponytail: 章节卡片逐章串行要几十秒；并行读，但超星 WAF 对突发请求敏感，限制为 6 路。被 403 时调小。
-CATALOG_WORKERS = 6
+# ponytail: 章节卡片逐章串行要几十秒；并行读，但超星 WAF 对突发请求敏感，只开 4 路（6 路实测会被拒）。被 403 时调小。
+CATALOG_WORKERS = 4
+# 单章读取被 WAF 拒绝或断连时，等这么久（秒，另加 0~1 秒抖动）再试；只读请求，重试无副作用。
+CHAPTER_RETRY_WAITS = (1, 3)
 
 
 def _chapter_jobs(client, course, include_finished=False):
     """每个章节和它的 (jobs, job_info)，按章节顺序返回；章节之间并行读取（纯读取）。"""
     points = client.course_points(course)["points"]
+
+    def read(point):
+        for wait in CHAPTER_RETRY_WAITS:
+            try:
+                return client.job_list(course, point, include_finished=include_finished)
+            except (ChaoxingError, PlatformUnavailable):  # 登录过期不是 ChaoxingError，照常抛出
+                time.sleep(wait + random.random())
+        return client.job_list(course, point, include_finished=include_finished)
+
     with ThreadPoolExecutor(CATALOG_WORKERS) as pool:
-        return list(zip(points, pool.map(
-            lambda point: client.job_list(course, point, include_finished=include_finished), points)))
+        return list(zip(points, pool.map(read, points)))
 
 
 def _status(client, course, name):

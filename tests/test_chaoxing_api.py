@@ -552,11 +552,7 @@ class StatusApiTest(unittest.TestCase):
         self.assertEqual([params["page"] for _, params in seen], [1, 2])
 
     def test_job_status_ids_returns_both_sets(self):
-        import threading
-        both_in = threading.Barrier(2, timeout=5)
-
         def handler(method, url, kwargs):
-            both_in.wait()
             if "/jobfinishedList" in url:
                 return FakeResponse(json_body={"data": [{"jobid": "done-1"}]})
             return FakeResponse(json_body={"data": {"list": [{"jobid": "todo-1"}]}})

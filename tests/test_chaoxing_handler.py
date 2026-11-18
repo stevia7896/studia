@@ -126,6 +126,23 @@ class CatalogTest(unittest.TestCase):
         entries = catalog(SlowClient(points=points), COURSE)
         self.assertEqual([item["jobid"] for _, item, _ in entries], ["w0", "w1", "w2", "w3"])
 
+    def test_chapter_read_retries_after_waf_refusal(self):
+        from unittest import mock
+        from ChaoxingMain.api import ChaoxingError
+        calls = []
+
+        class Flaky(FakeClient):
+            def job_list(self, course, point, include_finished=False):
+                calls.append(point["id"])
+                if len(calls) < 3:
+                    raise ChaoxingError("超星平台返回 HTTP 403")
+                return [JOB], {}
+
+        with mock.patch("ChaoxingMain.main.CHAPTER_RETRY_WAITS", (0, 0)), mock.patch("ChaoxingMain.main.time.sleep"):
+            entries = catalog(Flaky(), COURSE)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual([item["jobid"] for _, item, _ in entries], ["work-abc"])
+
     def test_units_leave_out_chapter_works(self):
         # 作业在「AI 答题」里做；只有作业的章节不进学习格子。
         self.assertEqual(course_units(FakeClient(), COURSE), [])
