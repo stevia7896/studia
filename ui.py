@@ -810,13 +810,13 @@ class TerminalUI:
                         model = self.ask("Model ID", model)
                         step = "key"
                     else:
-                        value = self.choice("DeepSeek 模型", [(1, "deepseek-chat", ""), (2, "deepseek-reasoner", ""),
+                        value = self.choice("DeepSeek 模型", [(1, "deepseek-v4-flash", ""), (2, "deepseek-v4-pro", ""),
                                                                (3, "自定义模型", "填写 Model ID")],
-                                            default={"deepseek-chat": 1, "deepseek-reasoner": 2}.get(model, 3 if model else 1))
+                                            default={"deepseek-v4-flash": 1, "deepseek-v4-pro": 2}.get(model, 3 if model else 1))
                         if value == 3:
                             step = "custom_model"
                         else:
-                            model = {1: "deepseek-chat", 2: "deepseek-reasoner"}[value]
+                            model = {1: "deepseek-v4-flash", 2: "deepseek-v4-pro"}[value]
                             step = "key"
                 elif step == "custom_model":
                     model = self.ask("DeepSeek Model ID", model)
@@ -1442,12 +1442,12 @@ def prompt_ai_config(input_fn=None, secret_fn=None, output=None):
             model = read("Model ID: ").strip()
         else:
             url = "https://api.deepseek.com"
-            emit("模型：1. deepseek-chat  2. deepseek-reasoner  3. 自定义模型 ID")
+            emit("模型：1. deepseek-v4-flash  2. deepseek-v4-pro  3. 自定义模型 ID")
             choice = read("请选择 [1/2/3]（默认1）: ").strip() or "1"
             if choice not in ("1", "2", "3"):
                 emit("请输入 1、2 或 3")
                 continue
-            model = {"1": "deepseek-chat", "2": "deepseek-reasoner"}.get(choice)
+            model = {"1": "deepseek-v4-flash", "2": "deepseek-v4-pro"}.get(choice)
             if model is None:
                 model = read("DeepSeek Model ID: ").strip()
         key = secret("API Key（隐藏输入，仅本次运行使用）: ")

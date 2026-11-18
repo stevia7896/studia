@@ -28,7 +28,7 @@ class ClientTests(unittest.TestCase):
 
     def test_deepseek_model_menu(self):
         config = prompt_config(Mock(side_effect=["2", "2"]), Mock(return_value="secret"), Mock())
-        self.assertEqual(config.model, "deepseek-reasoner")
+        self.assertEqual(config.model, "deepseek-v4-pro")
         self.assertEqual(config.base_url, "https://api.deepseek.com")
 
     def test_url_validation(self):

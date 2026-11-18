@@ -28,7 +28,7 @@ TASKS = [
 ]
 MODEL_ROWS = [
     ('builtin-default', '默认供应商', 'gemini-3.8-flash', '未测试'),
-    ('custom-1', '我的兼容服务', 'deepseek-chat', '✓ 上次通过'),
+    ('custom-1', '我的兼容服务', 'deepseek-v4-flash', '✓ 上次通过'),
     ('custom-2', '备用供应商', 'qwen-max', '× 失败'),
 ]
 CONFIG = AIConfig(base_url='https://example.org/v1', model='demo-model',
