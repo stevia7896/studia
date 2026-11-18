@@ -18,8 +18,8 @@ logger = Logger(__name__).get_log()
 
 DONE = ("submitted", "saved")
 UNIT_STATE = {"skipped": "skipped"}
-# ponytail: 章节卡片逐章串行要几十秒；并行读，但超星 WAF 对突发请求敏感，只开 4 路。被 403 时调小。
-CATALOG_WORKERS = 4
+# ponytail: 章节卡片逐章串行要几十秒；并行读，但超星 WAF 对突发请求敏感，限制为 6 路。被 403 时调小。
+CATALOG_WORKERS = 6
 
 
 def _chapter_jobs(client, course, include_finished=False):

@@ -354,6 +354,13 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(info, {"notOpen": True})
         self.assertEqual(len(session.calls), 1)
 
+    def test_job_list_does_not_sleep(self):
+        delays = []
+        api = ChaoxingApi(cookies={"UID": "1"}, session=FakeSession(lambda *args: FakeResponse(CARDS)),
+                          sleep=delays.append)
+        api.job_list(COURSE, POINT)
+        self.assertEqual(delays, [])
+
 
 VIDEO_JOB = {"type": "video", "jobid": "work-v", "name": "视频1", "objectid": "obj",
              "otherinfo": "nodeId_123-a", "mid": "m1", "aid": "a1", "playTime": 30000,
@@ -545,7 +552,11 @@ class StatusApiTest(unittest.TestCase):
         self.assertEqual([params["page"] for _, params in seen], [1, 2])
 
     def test_job_status_ids_returns_both_sets(self):
+        import threading
+        both_in = threading.Barrier(2, timeout=5)
+
         def handler(method, url, kwargs):
+            both_in.wait()
             if "/jobfinishedList" in url:
                 return FakeResponse(json_body={"data": [{"jobid": "done-1"}]})
             return FakeResponse(json_body={"data": {"list": [{"jobid": "todo-1"}]}})

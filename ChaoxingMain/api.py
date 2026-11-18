@@ -6,6 +6,7 @@
 写操作（交卷、上报进度）不自动重试。
 """
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import random
@@ -368,11 +369,16 @@ class ChaoxingApi:
                                  headers=COURSE_LIST_HEADERS)
         courses = decode_course_list(response.text)
         folders = decode_course_folder(self._request("get", MOOC2_URL + "/visit/interaction").text)
-        for folder in folders:
-            payload = {"courseType": 1, "courseFolderId": folder["id"], "query": "", "superstarClass": 0}
-            page = self._request("post", MOOC2_URL + "/visit/courselistdata", data=payload,
-                                 headers=COURSE_LIST_HEADERS)
-            courses += decode_course_list(page.text)
+        if folders:
+            def read_folder(folder):
+                data = {"courseType": 1, "courseFolderId": folder["id"], "query": "", "superstarClass": 0}
+                return decode_course_list(
+                    self._request("post", MOOC2_URL + "/visit/courselistdata", data=data,
+                                  headers=COURSE_LIST_HEADERS).text)
+
+            with ThreadPoolExecutor(min(len(folders), 4)) as pool:
+                for items in pool.map(read_folder, folders):
+                    courses += items
         return courses
 
     def course_points(self, course):
@@ -387,7 +393,6 @@ class ChaoxingApi:
         直到没有新卡片；这一步是纯读取。``include_finished=True`` 时把已完成的任务点
         也带回来（网页课程页要显示 1/1，而不是把已学卡片过滤掉变成 0/0）。
         """
-        self.sleep(0.5)
         jobs, job_info, seen, cards = [], {}, set(), set()
         params = {
             "clazzid": course["clazzId"],
@@ -473,7 +478,10 @@ class ChaoxingApi:
 
     def job_status_ids(self, course):
         """(已完成, 未完成) 的 jobid 集合；给网页任务卡片展示用。"""
-        return self.finished_job_ids(course), self.unfinished_job_ids(course)
+        with ThreadPoolExecutor(2) as pool:
+            finished = pool.submit(self.finished_job_ids, course)
+            unfinished = pool.submit(self.unfinished_job_ids, course)
+            return finished.result(), unfinished.result()
 
     # ------------------------------------------------------------------ 学习
 
