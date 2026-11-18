@@ -1001,7 +1001,7 @@ function renderModels(head, models, editing = null, again = true) {
       <h3>${m ? "编辑模型" : "添加模型"}</h3>
       <div class="field"><label>名称</label><input name="provider_name" value="${esc(m?.provider || "")}" placeholder="方便自己区分，例如 DeepSeek 官方"></div>
       <div class="field"><label>服务地址</label><input name="base_url" value="${esc(m?.base_url || "")}" placeholder="https://api.example.com/v1" required></div>
-      <div class="field"><label>模型</label><input name="model" value="${esc(m?.model || "")}" placeholder="例如 deepseek-chat" required></div>
+      <div class="field"><label>模型</label><input name="model" value="${esc(m?.model || "")}" placeholder="例如 deepseek-v4-flash" required></div>
       <div class="field"><label>API Key</label><input name="api_key" type="password" autocomplete="off" ${m ? `placeholder="留空则不修改（当前 ${esc(m.key_hint)}）"` : "required"}></div>
       <div class="form_btns">${m?.deletable ? '<button type="button" class="btn danger" data-delete data-confirm="确认删除">删除这个模型</button><span class="grow"></span>' : ""}<button type="button" class="btn" data-cancel>取消</button><button class="btn primary">${m ? "保存" : "保存并测试"}</button></div>
     </form>`;
