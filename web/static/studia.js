@@ -214,6 +214,7 @@ function homeOf(p) {
 function switchPlatform(pid, navigate = true) {
   state.current = pid;
   store.set("studia-platform", pid);
+  if (platformOf(pid)?.logged_in && !state.courses[pid]) loadCourses(pid);
   if (navigate) go(homeOf(platformOf(pid)));
   else renderSidebar();
 }
@@ -1731,7 +1732,7 @@ async function afterLogin(pid) {
   toast("登录成功");
   forgetPlatform(pid);
   await refreshState();
-  if (!state.courses[pid]) await loadCourses(pid);  // the account event's refresh may be the one still reading them
+  if (!state.courses[pid]) loadCourses(pid);
   if (back) go(back);
   else switchPlatform(pid);
 }
@@ -1803,7 +1804,7 @@ async function refreshState(catchUp = false) {
     for (const job of live) markLive(key(job.platform, job.course));
     for (const p of state.platforms) if (!p.logged_in) { delete state.courses[p.id]; forgetPlatform(p.id); }
     // Signed in from another tab or device: this tab has no course list for it yet.
-    if (before) await Promise.all(state.platforms.filter((p) => p.logged_in && !before.has(p.id)).map((p) => loadCourses(p.id)));
+    if (before) state.platforms.filter((p) => p.logged_in && !before.has(p.id)).forEach((p) => loadCourses(p.id));
     watchTicket();
   } catch (error) { toast(error.message); }
   renderSidebar();
@@ -1927,7 +1928,11 @@ function route(event) {
   if (!name || name === "all") { go(homeOf(currentPlatform())); return; }
   if (name === "settings" && a === "admin") { go(`#/admin${b ? `/${b}` : ""}`); return; }  // old links
   if (name === "admin" && a === "jobs") { go("#/jobs/all"); return; }
-  if ((name === "course" || name === "login") && platformOf(a) && state.current !== a) { state.current = a; store.set("studia-platform", a); }
+  if ((name === "course" || name === "login") && platformOf(a) && state.current !== a) {
+    state.current = a;
+    store.set("studia-platform", a);
+    if (platformOf(a).logged_in && !state.courses[a]) loadCourses(a);
+  }
   if (name !== "login") state.loginToken.cancelled = true;
   if (name !== "login") state.returnTo = "";
   else if (b === "again" && event?.oldURL) state.returnTo = new URL(event.oldURL).hash;
@@ -2091,6 +2096,10 @@ function showSiteNotice() {
   await refreshState();
   showSiteNotice();  // Do not wait for remote course catalogues before showing the announcement.
   connectEvents();
-  await Promise.all(state.platforms.filter((p) => p.logged_in).map((p) => loadCourses(p.id)));
   route();
+  const active = currentPlatform();
+  const logged = state.platforms.filter((p) => p.logged_in);
+  // Render immediately; fetch the active platform's courses first so other platforms don't contend for connections.
+  const first = active?.logged_in ? loadCourses(active.id) : Promise.resolve();
+  first.finally(() => logged.filter((p) => p.id !== active?.id).forEach((p) => loadCourses(p.id)));
 })();
