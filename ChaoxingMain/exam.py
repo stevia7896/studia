@@ -195,6 +195,12 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
             for index, question in enumerate(questions):
                 self._check()
                 self.reporter.questions(name, index, len(questions))
+                current_questions = decode_exam_questions(self._html())
+                if len(current_questions) != 1 or current_questions[0] != question:
+                    self._goto_question(index)
+                    current_questions = decode_exam_questions(self._html())
+                    if len(current_questions) != 1 or current_questions[0] != question:
+                        raise ExamNeedsUser("考试题目或已有答案发生变化，请在学习通核对")
                 question_values, question_problems = self._answer_all(
                     name, [question], check=self._check, report_progress=False)
                 values.update(question_values)
@@ -202,12 +208,12 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
                 value = question_values.get(question["id"])
                 if value is not None:
                     if value != question["existing_answer"]:
-                        self._goto_question(index)
                         (current,) = decode_exam_questions(self._html())
                         if current != question:
                             raise ExamNeedsUser("作答过程中题目或已有答案发生变化，请在学习通核对")
                         self._fill(question, value)
-                        self._submit(False)
+                        next_question = questions[index + 1] if index + 1 < len(questions) else None
+                        self._submit(False, next_question=next_question)
                 self.reporter.questions(name, index + 1, len(questions))
             saved = len(values)
             self.reporter.detail("逐题作答完成 · 已保存 %d/%d 题" % (saved, len(questions)))
@@ -216,6 +222,7 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
             if [q["id"] for q in verified] != [q["id"] for q in questions] or any(
                     q["existing_answer"] != values[q["id"]] for q in verified if q["id"] in values):
                 raise ExamNeedsUser("平台保存的答案与本次作答不一致，未交卷，请到学习通核对")
+            self.writing = False
             if self.auto_submit and saved == len(questions):
                 self._submit(True)
                 # 交卷 POST 只发一次；之后只读目录确认结果。
@@ -383,10 +390,10 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
             if len(visible) == 1:
                 self._check()
                 visible[0].click()
-                return
+                return label
         raise ExamNeedsUser("考试页面没有唯一的「%s」按钮，请在学习通操作" % labels[0])
 
-    def _submit(self, final):
+    def _submit(self, final, *, next_question=None):
         self._check()
         self.writing = True
         # 只有用户选择交卷时才接受原生交卷确认。其它验证由用户在平台处理。
@@ -398,7 +405,10 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
         self.page.on("dialog", dialog)
         try:
             with self.page.expect_response(lambda r: urlsplit(r.url).path == SUBMIT_PATH and r.request.method == "POST", timeout=30000) as reply:
-                self._click(("交卷", "提交试卷") if final else ("保存", "保存答案", "暂存", "下一题"))
+                labels = (("交卷", "提交试卷") if final else
+                          ("下一题", "保存", "保存答案", "暂存") if next_question is not None else
+                          ("保存", "保存答案", "暂存", "下一题"))
+                button = self._click(labels)
                 if final:
                     dialogs = self.page.locator('[role="dialog"], .layui-layer, .popDiv').filter(has_text=re.compile("交卷|提交试卷"))
                     for i in range(dialogs.count()):
@@ -409,6 +419,22 @@ class ChaoxingExamRunner(ChaoxingExerciseRunner):
                                 self._check()
                                 button.click()
             response = reply.value
+            if not final and button == "下一题" and next_question is not None:
+                if response.status != 200:
+                    raise ChaoxingError("平台未确认进入下一题，请到学习通核对")
+                from playwright.sync_api import Error
+                try:
+                    self.page.wait_for_function(
+                        "id => document.querySelector('input[name=questionId]')?.value === id",
+                        arg=next_question["id"], timeout=15000)
+                except Error:
+                    raise ExamNeedsUser("平台未确认本题保存并进入下一题，请到学习通核对；不会自动重试") from None
+                self._session()
+                (current,) = decode_exam_questions(self._html())
+                if current != next_question:
+                    raise ExamNeedsUser("下一题或已有答案与试卷目录不符，请到学习通核对")
+                self.writing = True
+                return
             mode = parse_qs(urlsplit(response.url).query).get("tempSave") or parse_qs(response.request.post_data or "").get("tempSave")
             if mode != ["false" if final else "true"]:
                 raise ChaoxingError("平台返回了非预期的保存/交卷操作")

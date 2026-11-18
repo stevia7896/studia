@@ -139,6 +139,21 @@ class ExamParsingTest(unittest.TestCase):
         with self.assertRaisesRegex(ExamNeedsUser, "作答记录发生变化"):
             runner._session()
 
+    def test_question_transition_prefers_the_platform_next_button(self):
+        runner = ChaoxingExamRunner(Mock(), Mock())
+        runner.page = Mock()
+        runner.deadline = None
+        next_button = Mock()
+        next_button.count.return_value = 1
+        next_button.nth.return_value = next_button
+        next_button.is_visible.return_value = True
+        runner.page.get_by_text.return_value = next_button
+
+        runner._click(("下一题", "保存", "保存答案"))
+
+        runner.page.get_by_text.assert_called_once_with("下一题", exact=True)
+        next_button.click.assert_called_once_with()
+
 
 class ExamWebTest(unittest.TestCase):
     def setUp(self):
@@ -308,8 +323,9 @@ class ExamBrowserTest(unittest.TestCase):
         html = '<form id="submitTest">' + "".join('<input id="%s" value="%s">' % (k, v) for k, v in fields.items())
         for i in ([qid] if qid else self.answers):
             html += question(i, self.kinds[i], titles[i], self.answers[i])
-        html += '</form><button onclick="save(false)">保存</button><button onclick="if(confirm(\'确认交卷？\'))save(true)">交卷</button>'
+        html += '</form><button onclick="save(false)">下一题</button><button onclick="save(false)">保存</button><button onclick="if(confirm(\'确认交卷？\'))save(true)">交卷</button>'
         html += """<script>
+        const questionIds = ["101", "102", "103", "104", "105"];
         function pick(node, id, kind) {
           const input = document.querySelector('#answer'+id), value = node.getAttribute('name');
           input.value = kind === '1' ? (input.value.includes(value) ? input.value.replace(value,'') : [...input.value+value].sort().join('')) : value;
@@ -321,7 +337,11 @@ class ExamBrowserTest(unittest.TestCase):
           const data = new URLSearchParams({qid, answer: JSON.stringify(answer), tempSave: String(!final)});
           const r = await fetch('/exam-ans/exam/test/reVersionSubmitTestNew?tempSave='+!final, {method:'POST',body:data});
           const result = await r.json();
-          if(result.status === 'success') document.querySelector('#enc').value = result.data.split('|')[2];
+          if(result.status === 'success') {
+            document.querySelector('#enc').value = result.data.split('|')[2];
+            if(!final && questionIds.indexOf(qid) + 1 < questionIds.length)
+              location.href = '/exam-ans/exam/test/reVersionTestStartNew?start=' + (questionIds.indexOf(qid) + 1);
+          }
         }
         </script>"""
         return html
@@ -371,7 +391,7 @@ class ExamBrowserTest(unittest.TestCase):
 
     def test_rejected_save_is_not_retried(self):
         self.rejected = True
-        with self.assertRaisesRegex(ExamNeedsUser, "平台拒绝保存"):
+        with self.assertRaisesRegex(ExamNeedsUser, "平台未确认本题保存"):
             self.run_exam()
         self.assertEqual(len(self.posts), 1)
         self.assertFalse(self.submitted)
