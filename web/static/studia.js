@@ -1732,9 +1732,9 @@ async function afterLogin(pid) {
   toast("登录成功");
   forgetPlatform(pid);
   await refreshState();
-  if (!state.courses[pid]) loadCourses(pid);
+  const loading = state.courses[pid] ? null : loadCourses(pid);
   if (back) go(back);
-  else switchPlatform(pid);
+  else { await loading; switchPlatform(pid); }  // desktop lands on the first course, which needs the list
 }
 
 // One read per platform at a time: a login seen by this tab and by the server's account event asks twice.
@@ -2096,10 +2096,12 @@ function showSiteNotice() {
   await refreshState();
   showSiteNotice();  // Do not wait for remote course catalogues before showing the announcement.
   connectEvents();
+  const bare = !parseHash(location.hash)[1];  // route() sends a bare URL to homeOf(), which needs the course list
   route();
   const active = currentPlatform();
   const logged = state.platforms.filter((p) => p.logged_in);
   // Render immediately; fetch the active platform's courses first so other platforms don't contend for connections.
   const first = active?.logged_in ? loadCourses(active.id) : Promise.resolve();
+  first.then(() => { if (bare && location.hash === "#/home" && active) go(homeOf(active)); });
   first.finally(() => logged.filter((p) => p.id !== active?.id).forEach((p) => loadCourses(p.id)));
 })();
